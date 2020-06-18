@@ -11,6 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
+    - uses: webfactory/ssh-agent@v0.3.0
+      with:
+          ssh-private-key: ${{ secrets.MEMFLOW_DEPLOY_KEY }}
     - name: Cache cargo build
       uses: actions/cache@v1
       env:
@@ -29,6 +32,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
+    - uses: webfactory/ssh-agent@v0.3.0
+      with:
+          ssh-private-key: ${{ secrets.MEMFLOW_DEPLOY_KEY }}
     - name: Cache cargo build
       uses: actions/cache@v1
       env:
@@ -45,6 +51,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
+    - uses: webfactory/ssh-agent@v0.3.0
+      with:
+          ssh-private-key: ${{ secrets.MEMFLOW_DEPLOY_KEY }}
     - name: Cache cargo build
       uses: actions/cache@v1
       env:
@@ -66,6 +75,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - uses: webfactory/ssh-agent@v0.3.0
+        with:
+          ssh-private-key: ${{ secrets.MEMFLOW_DEPLOY_KEY }}
       - name: Set up Rust nightly
         uses: actions-rs/toolchain@v1
         with:
