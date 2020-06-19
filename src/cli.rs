@@ -3,6 +3,7 @@ use std::io::{self, Write};
 
 use flow_core::*;
 use flow_win32::*;
+use flow_win32::{Error, Result};
 
 use pelite::{self, PeView};
 
@@ -21,7 +22,7 @@ where
     T: PhysicalMemory,
     V: VirtualTranslate,
 {
-    pub fn new(kernel: &'a mut Kernel<T, V>) -> flow_core::Result<Self> {
+    pub fn new(kernel: &'a mut Kernel<T, V>) -> Result<Self> {
         Ok(Self {
             kernel,
             process_info: None,
@@ -29,7 +30,7 @@ where
         })
     }
 
-    pub fn run(&mut self) -> flow_core::Result<()> {
+    pub fn run(&mut self) -> Result<()> {
         let con = unsafe { libc::isatty(0) != 0 };
 
         let cmds = vec![
@@ -281,7 +282,7 @@ where
         let export_addr = match pe.get_export_by_name("gafAsyncKeyState")? {
             Export::Symbol(s) => kernel_module.base() + Length::from(*s),
             Export::Forward(_) => {
-                return Err(flow_win32::Error::new(
+                return Err(flow_win32::Error::Other(
                     "export gafAsyncKeyState found but it is forwarded",
                 ))
             }
@@ -316,7 +317,7 @@ where
         let size_of_image = mi.size_of_image(&mut process.virt_mem).unwrap();
         let image = process
             .virt_mem
-            .virt_read_raw(mi.base(), size_of_image.into())
+            .virt_read_raw(mi.base(), size_of_image as usize)
             .unwrap();
         // TODO: lazy
         let pe = PeView::from_bytes(&image).unwrap();
@@ -361,7 +362,7 @@ where
             process.proc_info.name()
         );
 
-        let mut data = vec![0u8; mi.size().as_usize()]; // TODO: chunked read
+        let mut data = vec![0u8; mi.size()]; // TODO: chunked read
         process
             .virt_mem
             .virt_read_into(mi.base(), &mut *data)
@@ -395,7 +396,7 @@ fn find_command<'a, T>(
     selfptr: &mut T,
     cmds: &'a [Command<'a, T>],
     input: Vec<&str>,
-) -> flow_core::Result<()> {
+) -> Result<()> {
     for cmd in cmds {
         if input[0] == cmd.name {
             if cmd.func.is_some() {
@@ -404,22 +405,9 @@ fn find_command<'a, T>(
             } else if input.len() > 1 {
                 return find_command(selfptr, &cmd.subcmds, input[1..].to_vec());
             } else {
-                return Err(flow_core::Error::new(format!(
-                    "sub command not found. valid sub commands: {}",
-                    cmd.subcmds
-                        .iter()
-                        .map(|c| c.name)
-                        .collect::<Vec<&str>>()
-                        .join(", ")
-                )));
+                return Err(Error::Other("sub command not found. valid sub commands"));
             }
         }
     }
-    Err(flow_core::Error::new(format!(
-        "command not found. valid commands: {}",
-        cmds.iter()
-            .map(|c| c.name)
-            .collect::<Vec<&str>>()
-            .join(", ")
-    )))
+    Err(Error::Other("command not found."))
 }

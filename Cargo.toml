@@ -10,6 +10,8 @@ clap = { version = "2.33.0", features = ["yaml"] }
 [dependencies]
 flow-core = { git = "ssh://git@github.com/memflow/memflow.git", branch = "master" }
 flow-win32 = { git = "ssh://git@github.com/memflow/memflow.git", branch = "master" }
+#flow-core = { path = "../memflow/flow-core" }
+#flow-win32 = { path = "../memflow/flow-win32" }
 clap = { version = "2.33.0", features = ["yaml"] }
 toml = "0.5"
 serde = "1.0.97"
@@ -24,6 +26,7 @@ win_key_codes = "0.1.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 flow-qemu-procfs = { git = "ssh://git@github.com/memflow/memflow.git", branch = "master", optional = true }
+#flow-qemu-procfs = { path = "../memflow/connectors/flow-qemu-procfs", optional = true }
 
 [features]
 default = ["connector-qemu-procfs"]

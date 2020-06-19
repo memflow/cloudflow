@@ -7,10 +7,10 @@ pub struct EmptyPhysicalMemory {}
 
 impl PhysicalMemory for EmptyPhysicalMemory {
     fn phys_read_iter<'a, PI: PhysicalReadIterator<'a>>(&'a mut self, _iter: PI) -> Result<()> {
-        Err(Error::new("phys_read not implemented"))
+        Err(Error::Other("phys_read not implemented"))
     }
 
     fn phys_write_iter<'a, PI: PhysicalWriteIterator<'a>>(&'a mut self, _iter: PI) -> Result<()> {
-        Err(Error::new("phys_read not implemented"))
+        Err(Error::Other("phys_read not implemented"))
     }
 }

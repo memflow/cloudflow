@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use flow_core::timed_validator::*;
 use flow_core::*;
-use flow_core::{Error, Result};
+use flow_win32::{Error, Result};
 
 use flow_win32::*;
 
@@ -46,10 +46,10 @@ fn main() -> Result<()> {
             win32.run()
         } */
         "qemu_procfs" => init_qemu_procfs::init_qemu_procfs(&argv)?,
-        _ => return Err(Error::new("the connector requested does not exist")),
+        _ => return Err(Error::Other("the connector requested does not exist")),
     };
 
-    let kernel_info = KernelInfo::find(&mut phys_mem)?;
+    let kernel_info = KernelInfo::scanner().mem(&mut phys_mem).scan()?;
 
     /*
     let phys_page_cache = PageCache::new(

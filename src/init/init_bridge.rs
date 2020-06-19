@@ -20,7 +20,7 @@ pub struct Config {
 #[cfg(feature = "connector-bridge")]
 pub fn try_parse(file_name: &str) -> Result<Config> {
     let cfg = std::fs::read_to_string(file_name)?;
-    Ok(toml::from_str::<Config>(&cfg).map_err(Error::new)?)
+    Ok(toml::from_str::<Config>(&cfg).map_err(|_| Error::Other("unable to parse cfg"))?)
 }
 
 #[cfg(feature = "connector-bridge")]
@@ -62,5 +62,5 @@ pub fn init_bridge(argv: &ArgMatches) -> Result<BridgeClient> {
 
 #[cfg(not(feature = "connector-bridge"))]
 pub fn init_bridge(_argv: &ArgMatches) -> Result<super::EmptyPhysicalMemory> {
-    Err(Error::new("connector bridge is not enabled"))
+    Err(Error::Other("connector bridge is not enabled"))
 }
