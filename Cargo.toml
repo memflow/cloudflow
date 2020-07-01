@@ -10,8 +10,10 @@ clap = { version = "2.33.0", features = ["yaml"] }
 [dependencies]
 flow-core = { git = "ssh://git@github.com/memflow/memflow.git", branch = "master" }
 flow-win32 = { git = "ssh://git@github.com/memflow/memflow.git", branch = "master" }
+flow-coredump = { git = "ssh://git@github.com/memflow/memflow.git", branch = "master" }
 #flow-core = { path = "../memflow/flow-core" }
 #flow-win32 = { path = "../memflow/flow-win32" }
+#flow-coredump = { path = "../memflow/connectors/flow-coredump" }
 clap = { version = "2.33.0", features = ["yaml"] }
 toml = "0.5"
 serde = "1.0.97"

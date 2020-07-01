@@ -45,7 +45,8 @@ fn main() -> Result<()> {
             let mut win32 = Win32Interface::with(&mut mem, os)?;
             win32.run()
         } */
-        "qemu_procfs" => init_qemu_procfs::init_qemu_procfs(&argv)?,
+        "coredump" => flow_coredump::CoreDump::open(argv.value_of("connector_args").unwrap())?,
+        //"qemu_procfs" => init_qemu_procfs::init_qemu_procfs(&argv)?,
         _ => return Err(Error::Other("the connector requested does not exist")),
     };
 
