@@ -6,7 +6,7 @@ use cli::*;
 
 #[macro_use]
 extern crate clap;
-use clap::App;
+use clap::{App, ArgMatches};
 
 use log::{trace, Level};
 use std::time::Duration;
@@ -16,6 +16,16 @@ use flow_core::*;
 use flow_win32::{Error, Result};
 
 use flow_win32::*;
+
+fn init_backend(argv: &ArgMatches) -> Result<Box<dyn PhysicalMemory>> {
+    match argv.value_of("connector").unwrap() {
+        "coredump" => {
+            Ok(Box::new(flow_coredump::CoreDump::open(argv.value_of("connector_args").unwrap()).unwrap()))
+        }
+        "qemu_procfs" => Ok(Box::new(init_qemu_procfs::init_qemu_procfs(&argv).unwrap())),
+        _ => return Err(Error::Other("the connector requested does not exist")),
+    }
+}
 
 fn main() -> Result<()> {
     let yaml = load_yaml!("cli.yml");
@@ -29,28 +39,9 @@ fn main() -> Result<()> {
         _ => simple_logger::init_with_level(Level::Error).unwrap(),
     }
 
-    let mut phys_mem = match argv.value_of("connector").unwrap_or_else(|| "bridge") {
-        /* "bridge" => {
-            let mut conn = init_bridge::init_bridge(&argv).unwrap();
-            let os = Win32::try_with(&mut conn)?;
+    let mut phys_mem = init_backend(&argv).unwrap();
 
-            let cache = PageCache::new(
-                os.start_block.arch,
-                Length::from_mb(32),
-                PageType::PAGE_TABLE | PageType::READ_ONLY,
-                TimedCacheValidator::new(Duration::from_millis(1000).into()),
-            );
-            let mut mem = CachedMemoryAccess::with(&mut conn, cache);
-
-            let mut win32 = Win32Interface::with(&mut mem, os)?;
-            win32.run()
-        } */
-        "coredump" => flow_coredump::CoreDump::open(argv.value_of("connector_args").unwrap())?,
-        //"qemu_procfs" => init_qemu_procfs::init_qemu_procfs(&argv)?,
-        _ => return Err(Error::Other("the connector requested does not exist")),
-    };
-
-    let kernel_info = KernelInfo::scanner().mem(&mut phys_mem).scan()?;
+    let kernel_info = KernelInfo::scanner().mem(&mut *phys_mem).scan()?;
 
     /*
     let phys_page_cache = PageCache::new(
@@ -90,7 +81,7 @@ fn main() -> Result<()> {
 
     let offsets = Win32Offsets::try_with_guid(&kernel_info.kernel_guid)?;
     trace!("offsets: {:?}", offsets);
-    let mut kernel = Kernel::new(mem_cached, vat_cached, offsets, kernel_info);
+    let mut kernel = Kernel::new(&mut *mem_cached, vat_cached, offsets, kernel_info);
 
     let mut win32 = Win32Interface::new(&mut kernel)?;
     win32.run()
