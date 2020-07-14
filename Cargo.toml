@@ -1,36 +1,13 @@
-[package]
-name = "memflow-cli"
-version = "0.1.0"
-authors = ["ko1N <ko1N1337@gmail.com>"]
-edition = "2018"
 
-[build-dependencies]
-clap = { version = "2.33.0", features = ["yaml"] }
+[profile.bench]
+debug = true
 
-[dependencies]
-flow-core = { git = "ssh://git@github.com/memflow/memflow.git", branch = "dev" }
-flow-win32 = { git = "ssh://git@github.com/memflow/memflow.git", branch = "dev" }
-flow-coredump = { git = "ssh://git@github.com/memflow/memflow.git", branch = "dev" }
-#flow-core = { path = "../memflow/flow-core" }
-#flow-win32 = { path = "../memflow/flow-win32" }
-#flow-coredump = { path = "../memflow/connectors/flow-coredump" }
-clap = { version = "2.33.0", features = ["yaml"] }
-toml = "0.5"
-serde = "1.0.97"
-serde_derive = "1.0"
-simple_logger = "1.0.1"
-log = "0.4.8"
-libc = "0.2.69"
-pdb = { git = "https://github.com/willglynn/pdb" }
-pelite = { git = "https://github.com/ko1n/pelite" }
-url = "2.1.0"
-win_key_codes = "0.1.2"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-flow-qemu-procfs = { git = "ssh://git@github.com/memflow/memflow.git", branch = "dev", optional = true }
-#flow-qemu-procfs = { path = "../memflow/connectors/flow-qemu-procfs", optional = true }
-
-[features]
-default = ["connector-qemu-procfs"]
-#connector-bridge = ["flow-bridge"]
-connector-qemu-procfs = ["flow-qemu-procfs"]
+[workspace]
+members = [
+    "flow-daemon",
+    "flow-cli",
+]
+default-members = [
+    "flow-daemon",
+    "flow-cli",
+]

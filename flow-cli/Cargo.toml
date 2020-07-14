@@ -1,0 +1,23 @@
+[package]
+name = "flow-cli"
+version = "0.1.0"
+authors = ["ko1N <ko1N1337@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+flow-daemon = { path = "../flow-daemon" }
+clap = { version = "2.33.0" }
+log = "0.4.8"
+simple_logger = "1.0.1"
+
+# tokio
+tokio = { version = "0.2.0", features = ["full"] }
+tokio-util = { version = "0.3.0", features = ["full"] }
+bytes = "0.5"
+futures = "0.3.0"
+http = "0.2"
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0"
+httparse = "1.0"
+time = "0.1"
