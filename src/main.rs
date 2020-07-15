@@ -19,9 +19,9 @@ use flow_win32::*;
 
 fn init_backend(argv: &ArgMatches) -> Result<Box<dyn PhysicalMemory>> {
     match argv.value_of("connector").unwrap() {
-        "coredump" => {
-            Ok(Box::new(flow_coredump::CoreDump::open(argv.value_of("connector_args").unwrap()).unwrap()))
-        }
+        "coredump" => Ok(Box::new(
+            flow_coredump::create_connector(argv.value_of("connector_args").unwrap()).unwrap(),
+        )),
         "qemu_procfs" => Ok(Box::new(init_qemu_procfs::init_qemu_procfs(&argv).unwrap())),
         _ => return Err(Error::Other("the connector requested does not exist")),
     }
@@ -79,7 +79,7 @@ fn main() -> Result<()> {
 
     let vat_cached = vat;
 
-    let offsets = Win32Offsets::try_with_guid(&kernel_info.kernel_guid)?;
+    let offsets = Win32Offsets::try_with_kernel_info(&kernel_info)?;
     trace!("offsets: {:?}", offsets);
     let mut kernel = Kernel::new(&mut *mem_cached, vat_cached, offsets, kernel_info);
 
