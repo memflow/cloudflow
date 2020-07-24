@@ -1,7 +1,7 @@
 //pub mod init_bridge;
 pub mod init_qemu_procfs;
 
-use flow_core::*;
+use memflow_core::*;
 
 pub struct EmptyPhysicalMemory {}
 

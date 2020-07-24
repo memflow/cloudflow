@@ -11,16 +11,17 @@ use clap::{App, ArgMatches};
 use log::{trace, Level};
 use std::time::Duration;
 
-use flow_core::timed_validator::*;
-use flow_core::*;
-use flow_win32::{Error, Result};
+use memflow_core::timed_validator::*;
+use memflow_core::*;
+use memflow_core::connector::*;
+use memflow_win32::{Error, Result};
 
-use flow_win32::*;
+use memflow_win32::*;
 
 fn init_backend(argv: &ArgMatches) -> Result<Box<dyn PhysicalMemory>> {
     match argv.value_of("connector").unwrap() {
         "coredump" => Ok(Box::new(
-            flow_coredump::create_connector(argv.value_of("connector_args").unwrap()).unwrap(),
+            memflow_coredump::create_connector(&ConnectorArgs::with_default(argv.value_of("connector_args").unwrap())).unwrap(),
         )),
         "qemu_procfs" => Ok(Box::new(init_qemu_procfs::init_qemu_procfs(&argv).unwrap())),
         _ => return Err(Error::Other("the connector requested does not exist")),

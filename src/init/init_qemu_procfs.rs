@@ -1,24 +1,24 @@
 use clap::ArgMatches;
 
-use flow_core::*;
+use memflow_core::*;
 
 #[cfg(all(target_os = "linux", feature = "connector-qemu-procfs"))]
-pub fn init_qemu_procfs(argv: &ArgMatches) -> Result<flow_qemu_procfs::Memory> {
+pub fn init_qemu_procfs(argv: &ArgMatches) -> Result<memflow_qemu_procfs::QemuProcfs> {
     if argv.is_present("connector_args") {
-        flow_qemu_procfs::Memory::with_guest_name(argv.value_of("connector_args").unwrap())
+        memflow_qemu_procfs::QemuProcfs::with_guest_name(argv.value_of("connector_args").unwrap())
     } else {
-        flow_qemu_procfs::Memory::new()
+        memflow_qemu_procfs::QemuProcfs::new()
     }
 }
 
 #[cfg(all(feature = "connector-qemu-procfs", not(target_os = "linux")))]
-pub fn init_qemu_procfs(argv: &ArgMatches) -> Result<super::EmptyVirtualMemory> {
+pub fn init_qemu_procfs(_argv: &ArgMatches) -> Result<super::EmptyPhysicalMemory> {
     Err(Error::Other(
         "connector qemu_procfs is not available on this system",
     ))
 }
 
 #[cfg(not(feature = "connector-qemu-procfs"))]
-pub fn init_qemu_procfs(argv: &ArgMatches) -> Result<super::EmptyVirtualMemory> {
+pub fn init_qemu_procfs(_argv: &ArgMatches) -> Result<super::EmptyPhysicalMemory> {
     Err(Error::Other("connector qemu-procfs is not enabled"))
 }
