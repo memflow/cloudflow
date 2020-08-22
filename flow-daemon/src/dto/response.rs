@@ -4,6 +4,7 @@ use serde_derive::*;
 pub enum Message {
     Log(Log),
     Table(Table),
+    EOF,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

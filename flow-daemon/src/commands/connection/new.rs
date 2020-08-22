@@ -4,8 +4,6 @@ use crate::error::{Error, Result};
 use crate::response;
 use crate::state::{new_uuid, ConnectorState, Kernel, STATE};
 
-use log::info;
-
 use futures::Sink;
 use std::marker::Unpin;
 
@@ -27,13 +25,13 @@ pub async fn handle_command<S: Sink<response::Message> + Unpin>(
     frame: &mut S,
     msg: request::Connect,
 ) -> Result<()> {
-    let mut output = String::new();
-
     match create_connector(&msg) {
         Ok(conn) => {
             // TODO: add os argument
             // TODO: redirect log to client
             // TODO: add cache options
+
+            send_log_info(frame, "connector created").await?;
 
             // initialize kernel
             let kernel = memflow_win32::Kernel::builder(conn)
@@ -41,35 +39,37 @@ pub async fn handle_command<S: Sink<response::Message> + Unpin>(
                 .build()
                 .map_err(|_| Error::Connector("unable to find kernel"))?;
 
-            output.push_str(&format!("found win32 kernel",));
+            send_log_info(frame, "found win32 kernel").await?;
 
-            if let Ok(mut state) = STATE.lock() {
-                let uuid = new_uuid();
+            let mut state = STATE.lock().await;
 
-                let conn_state =
-                    ConnectorState::new(&uuid, &msg.name, msg.args.clone(), Kernel::Win32(kernel));
+            let uuid = new_uuid();
 
-                state.connectors.insert(uuid.clone(), conn_state);
+            let conn_state =
+                ConnectorState::new(&uuid, &msg.name, msg.args.clone(), Kernel::Win32(kernel));
 
-                output.push_str(&format!(
-                    "connection created: {}\t{}\t{:?}",
+            state.connectors.insert(uuid.clone(), conn_state);
+
+            send_log_info(
+                frame,
+                &format!(
+                    "connection created: {} | {} | {:?}",
                     uuid, msg.name, msg.args
-                ));
-            } else {
-                output.push_str(&format!(
-                    "error: could not create connector: {}\t{:?}",
-                    msg.name, msg.args
-                ));
-            }
+                ),
+            )
+            .await?;
         }
         Err(err) => {
-            output.push_str(&format!(
-                "error: could not create connector: {}\t{:?} ({})",
-                msg.name, msg.args, err
-            ));
+            send_log_error(
+                frame,
+                &format!(
+                    "could not create connector: {} | {:?} ({})",
+                    msg.name, msg.args, err
+                ),
+            )
+            .await?;
         }
     };
 
-    info!("{}", output);
-    write_log(frame, &output).await
+    send_eof(frame).await
 }

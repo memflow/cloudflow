@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
             );
 
             // currently a client is only supposed to send a single request
-            if let Some(msg) = deserializer.try_next().await.unwrap() {
+            while let Some(msg) = deserializer.try_next().await.unwrap() {
                 match msg {
                     request::Message::Connect(msg) => {
                         commands::connection::new::handle_command(&mut serializer, msg)

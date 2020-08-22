@@ -35,15 +35,9 @@ pub fn handle_command(matches: &ArgMatches) {
     let name = matches.value_of(CONNECTOR_NAME).unwrap();
     let args = matches.value_of(CONNECTOR_ARGS);
 
-    dispatch_request(
-        request::Message::Connect(request::Connect {
-            name: name.to_string(),
-            args: args.map(|s| s.to_string()),
-        }),
-        |msg| -> Result<()> {
-            println!("stuff: {:?}", msg);
-            Ok(()) // continue
-        },
-    )
-    .ok();
+    dispatch_request(request::Message::Connect(request::Connect {
+        name: name.to_string(),
+        args: args.map(|s| s.to_string()),
+    }))
+    .unwrap();
 }

@@ -27,12 +27,8 @@ pub fn handle_command(matches: &ArgMatches) {
 
     let id = matches.value_of(CONNECTOR_ID).unwrap();
 
-    dispatch_request(
-        request::Message::CloseConnection(request::CloseConnection { id: id.to_string() }),
-        |msg| -> Result<()> {
-            println!("stuff: {:?}", msg);
-            Ok(()) // continue
-        },
-    )
-    .ok();
+    dispatch_request(request::Message::CloseConnection(
+        request::CloseConnection { id: id.to_string() },
+    ))
+    .unwrap();
 }

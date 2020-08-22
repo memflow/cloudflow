@@ -1,17 +1,27 @@
-use crate::error::{Error, Result};
+use crate::dispatch::*;
+use crate::error::Result;
 use crate::response;
 use crate::state::STATE;
 
-use futures::prelude::*;
 use futures::Sink;
 use std::marker::Unpin;
 
 pub async fn handle_command<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()> {
-    let mut table = response::Table::default();
+    let state = STATE.lock().await;
 
-    table.headers = vec!["id".to_string(), "name".to_string(), "args".to_string()];
+    send_log_warn(
+        frame,
+        &format!(
+            "listing open connections: {} connections",
+            state.connectors.len()
+        ),
+    )
+    .await?;
 
-    if let Ok(state) = STATE.lock() {
+    if !state.connectors.is_empty() {
+        let mut table = response::Table::default();
+        table.headers = vec!["id".to_string(), "name".to_string(), "args".to_string()];
+
         for c in state.connectors.iter() {
             let entry = vec![
                 c.1.id.to_string(),
@@ -20,10 +30,9 @@ pub async fn handle_command<S: Sink<response::Message> + Unpin>(frame: &mut S) -
             ];
             table.entries.push(entry);
         }
+
+        send_table(frame, table).await?;
     }
 
-    frame
-        .send(response::Message::Table(table))
-        .await
-        .map_err(|_| Error::IO)
+    send_eof(frame).await
 }

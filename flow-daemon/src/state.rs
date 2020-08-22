@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 
 use lazy_static::lazy_static;
 use uuid::Uuid;

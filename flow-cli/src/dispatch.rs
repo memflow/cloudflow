@@ -1,6 +1,7 @@
 use crate::error::{Error, Result};
 
 use futures::prelude::*;
+use log::{debug, error, info, warn};
 use tokio::net::UnixStream;
 use tokio_serde::formats::*;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
@@ -11,18 +12,12 @@ use prettytable::{format, Table};
 
 pub const SOCKET_PATH: &str = "/var/run/memflow.sock";
 
-pub fn dispatch_request<T: Fn(&response::Message) -> Result<()>>(
-    req: request::Message,
-    cb: T,
-) -> Result<()> {
+pub fn dispatch_request(req: request::Message) -> Result<()> {
     let mut rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(dispatch_async(req, cb))
+    rt.block_on(dispatch_async(req))
 }
 
-async fn dispatch_async<T: Fn(&response::Message) -> Result<()>>(
-    req: request::Message,
-    cb: T,
-) -> Result<()> {
+async fn dispatch_async(req: request::Message) -> Result<()> {
     // TODO: print error messages on connection failure
     let mut socket = UnixStream::connect(SOCKET_PATH)
         .await
@@ -46,7 +41,15 @@ async fn dispatch_async<T: Fn(&response::Message) -> Result<()>>(
 
     'outer: while let Some(msg) = deserializer.try_next().await.unwrap() {
         match msg {
-            response::Message::Log(msg) => println!("{}", msg.msg),
+            response::Message::Log(msg) => {
+                match msg.level {
+                    1 /* Debug::Error */ => error!("{}", msg.msg),
+                    2 /* Debug::Warn */ => warn!("{}", msg.msg),
+                    3 /* Debug::Info */ => info!("{}", msg.msg),
+                    4 /* Debug::Debug */ => debug!("{}", msg.msg),
+                    _ => (),
+                }
+            }
             response::Message::Table(msg) => {
                 let mut table = Table::new();
                 table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
@@ -56,11 +59,8 @@ async fn dispatch_async<T: Fn(&response::Message) -> Result<()>>(
                 });
                 table.printstd();
             }
-            _ => {
-                // TODO: does this callback make sense?
-                if cb(&msg).is_err() {
-                    break 'outer;
-                }
+            response::Message::EOF => {
+                break 'outer;
             }
         };
     }

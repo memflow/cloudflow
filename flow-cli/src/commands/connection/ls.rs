@@ -16,9 +16,5 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
 pub fn handle_command(_matches: &ArgMatches) {
     trace!("handling command");
 
-    dispatch_request(request::Message::ListConnections, |msg| -> Result<()> {
-        println!("stuff: {:?}", msg);
-        Ok(()) // continue
-    })
-    .ok();
+    dispatch_request(request::Message::ListConnections).unwrap();
 }
