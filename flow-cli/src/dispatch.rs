@@ -1,14 +1,15 @@
 use crate::error::{Error, Result};
 
-use bytes::BytesMut;
 use log::info;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use futures::prelude::*;
 use tokio::net::UnixStream;
+use tokio_serde::formats::*;
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 use flow_daemon::{request, response};
 
-pub const SOCKET_PATH: &'static str = "/var/run/memflow.sock";
+pub const SOCKET_PATH: &str = "/var/run/memflow.sock";
 
 pub fn dispatch_request<T: Fn(&response::Message) -> Result<()>>(
     req: request::Message,
@@ -26,37 +27,33 @@ async fn dispatch_async<T: Fn(&response::Message) -> Result<()>>(
         .await
         .map_err(|_| Error::IO)?;
 
-    write_request(&mut socket, req).await?;
+    let (reader, writer) = socket.split();
 
-    'outer: loop {
-        let mut buf = BytesMut::with_capacity(1024);
-        socket
-            .read_buf(&mut buf)
-            .await
-            .map_err(|_| Error::SocketRead)?;
+    let framed_writer = FramedWrite::new(writer, LengthDelimitedCodec::new());
+    let mut serializer = tokio_serde::SymmetricallyFramed::new(
+        framed_writer,
+        SymmetricalJson::<request::Message>::default(),
+    );
 
-        let strbuf = String::from_utf8(buf.to_vec()).map_err(|_| Error::Deserialize)?;
-        let resp: response::Message =
-            serde_json::from_str(&strbuf).map_err(|_| Error::Deserialize)?;
+    let framed_reader = FramedRead::new(reader, LengthDelimitedCodec::new());
+    let mut deserializer = tokio_serde::SymmetricallyFramed::new(
+        framed_reader,
+        SymmetricalJson::<response::Message>::default(),
+    );
 
-        match resp {
+    serializer.send(req).await.map_err(|_| Error::IO)?;
+
+    'outer: while let Some(msg) = deserializer.try_next().await.unwrap() {
+        match msg {
             response::Message::Log(msg) => info!("{}", msg.msg),
             _ => {
-                if cb(&resp).is_err() {
+                // TODO: does this callback make sense?
+                if cb(&msg).is_err() {
                     break 'outer;
                 }
             }
-        }
+        };
     }
 
-    Ok(())
-}
-
-async fn write_request(socket: &mut UnixStream, msg: request::Message) -> Result<()> {
-    let msgstr = serde_json::to_string(&msg).map_err(|_| Error::Serialize)?;
-    socket
-        .write_all(msgstr.as_bytes())
-        .await
-        .expect("failed to write data to socket");
     Ok(())
 }

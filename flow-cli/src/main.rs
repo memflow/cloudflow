@@ -5,9 +5,9 @@ mod dispatch;
 
 #[macro_use]
 extern crate clap;
-use clap::{App, ArgMatches};
+use clap::App;
 
-use log::{trace, Level};
+use log::Level;
 
 fn main() {
     let matches = App::new(crate_name!())

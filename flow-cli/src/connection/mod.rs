@@ -4,7 +4,7 @@ use clap::{App, ArgMatches, SubCommand};
 
 use log::trace;
 
-pub const COMMAND_STR: &'static str = "connection";
+pub const COMMAND_STR: &str = "connection";
 
 pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
     SubCommand::with_name(COMMAND_STR)

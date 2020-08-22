@@ -7,10 +7,10 @@ use log::trace;
 
 use flow_daemon::request;
 
-pub const COMMAND_STR: &'static str = "open";
+pub const COMMAND_STR: &str = "open";
 
-const CONNECTOR_NAME: &'static str = "CONNECTOR_NAME";
-const CONNECTOR_ARGS: &'static str = "CONNECTOR_ARGS";
+const CONNECTOR_NAME: &str = "CONNECTOR_NAME";
+const CONNECTOR_ARGS: &str = "CONNECTOR_ARGS";
 
 pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
     SubCommand::with_name(COMMAND_STR)
@@ -38,7 +38,7 @@ pub fn handle_command(matches: &ArgMatches) {
     dispatch_request(
         request::Message::Connect(request::Connect {
             name: name.to_string(),
-            arg: None, // TODO:
+            arg: arg.map(|s| s.to_string()),
         }),
         |msg| -> Result<()> {
             println!("stuff: {:?}", msg);

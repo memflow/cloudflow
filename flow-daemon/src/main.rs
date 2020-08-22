@@ -7,10 +7,10 @@ use dto::*;
 mod connection;
 mod dispatch;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{UnixListener, UnixStream};
-
-use bytes::BytesMut;
+use futures::prelude::*;
+use tokio::net::UnixListener;
+use tokio_serde::formats::*;
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -20,30 +20,33 @@ async fn main() -> Result<()> {
         let (mut socket, _) = listener.accept().await.map_err(|_| Error::IO)?;
 
         tokio::spawn(async move {
-            let mut buf = BytesMut::with_capacity(1024);
+            let (reader, writer) = socket.split();
 
-            let n = socket
-                .read_buf(&mut buf)
-                .await
-                .expect("failed to read data from socket");
+            let framed_reader = FramedRead::new(reader, LengthDelimitedCodec::new());
+            let mut deserializer = tokio_serde::SymmetricallyFramed::new(
+                framed_reader,
+                SymmetricalJson::<request::Message>::default(),
+            );
 
-            if n == 0 {
-                return;
+            let framed_writer = FramedWrite::new(writer, LengthDelimitedCodec::new());
+            let mut serializer = tokio_serde::SymmetricallyFramed::new(
+                framed_writer,
+                SymmetricalJson::<response::Message>::default(),
+            );
+
+            if let Some(msg) = deserializer.try_next().await.unwrap() {
+                match msg {
+                    request::Message::Connect(msg) => {
+                        connection::open::handle_command(&mut serializer, &msg)
+                            .await
+                            .expect("failed to execute connect command")
+                    }
+                    request::Message::ListConnections(_msg) => println!("list command"),
+                    request::Message::CloseConnection(_msg) => println!("close command"),
+                };
+
+                // currently a client is only supposed to send a single request
             }
-
-            let json = std::str::from_utf8(&buf).unwrap().to_string();
-            let json_trimmed =
-                json.trim_matches(|c: char| c.is_ascii_whitespace() || c.is_ascii_control());
-            //println!("json: '{}'", json_trimmed);
-            let obj: request::Message = serde_json::from_str(json_trimmed).unwrap();
-
-            match obj {
-                request::Message::Connect(msg) => {
-                    connection::open::handle_command(&mut socket, &msg).await.expect("failed to execute connect command")
-                }
-                request::Message::ListConnections(msg) => println!("list command"),
-                request::Message::CloseConnection(msg) => println!("close command"),
-            };
         });
     }
 }

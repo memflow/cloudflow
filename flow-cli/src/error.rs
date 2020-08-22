@@ -1,6 +1,7 @@
 use std::error;
 use std::{convert, fmt, result, str};
 
+#[allow(unused)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Error {
     /// Generic error type containing a string
