@@ -6,7 +6,7 @@ use tokio::net::UnixStream;
 use tokio_serde::formats::*;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
-use flow_daemon::{request, response};
+use memflow_daemon::{request, response};
 
 use prettytable::{format, Table};
 

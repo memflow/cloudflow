@@ -5,7 +5,7 @@ use clap::{App, Arg, ArgMatches, SubCommand};
 
 use log::trace;
 
-use flow_daemon::request;
+use memflow_daemon::request;
 
 pub const COMMAND_STR: &str = "rm";
 

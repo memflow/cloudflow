@@ -1,11 +1,11 @@
 [package]
-name = "flow-cli"
+name = "memflow"
 version = "0.1.0"
 authors = ["ko1N <ko1N1337@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-flow-daemon = { path = "../flow-daemon" }
+memflow-daemon = { path = "../memflow-daemon" }
 clap = { version = "2.33.0" }
 log = "0.4.8"
 simple_logger = "1.0.1"
