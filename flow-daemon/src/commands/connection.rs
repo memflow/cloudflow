@@ -21,7 +21,7 @@ fn create_connector(msg: &request::Connect) -> Result<ConnectorInstance> {
         .map_err(|_| Error::Connector("unable to create connector"))
 }
 
-pub async fn handle_command<S: Sink<response::Message> + Unpin>(
+pub async fn new<S: Sink<response::Message> + Unpin>(
     frame: &mut S,
     msg: request::Connect,
 ) -> Result<()> {
@@ -70,6 +70,53 @@ pub async fn handle_command<S: Sink<response::Message> + Unpin>(
             .await?;
         }
     };
+
+    send_eof(frame).await
+}
+
+pub async fn ls<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()> {
+    let state = STATE.lock().await;
+
+    send_log_warn(
+        frame,
+        &format!(
+            "listing open connections: {} connections",
+            state.connectors.len()
+        ),
+    )
+    .await?;
+
+    if !state.connectors.is_empty() {
+        let mut table = response::Table::default();
+        table.headers = vec!["id".to_string(), "name".to_string(), "args".to_string()];
+
+        for c in state.connectors.iter() {
+            let entry = vec![
+                c.1.id.to_string(),
+                c.1.name.to_string(),
+                c.1.args.as_ref().map(|a| a.to_string()).unwrap_or_default(),
+            ];
+            table.entries.push(entry);
+        }
+
+        send_table(frame, table).await?;
+    }
+
+    send_eof(frame).await
+}
+
+pub async fn rm<S: Sink<response::Message> + Unpin>(
+    frame: &mut S,
+    msg: request::CloseConnection,
+) -> Result<()> {
+    let mut state = STATE.lock().await;
+
+    if state.connectors.contains_key(&msg.id) {
+        state.connectors.remove(&msg.id);
+        send_log_info(frame, &format!("connection {} removed", msg.id)).await?;
+    } else {
+        send_log_error(frame, &format!("no connection with id {} found", msg.id)).await?;
+    }
 
     send_eof(frame).await
 }

@@ -53,23 +53,21 @@ async fn main() -> Result<()> {
             while let Some(msg) = deserializer.try_next().await.unwrap() {
                 match msg {
                     request::Message::Connect(msg) => {
-                        commands::connection::new::handle_command(&mut serializer, msg)
+                        commands::connection::new(&mut serializer, msg)
                             .await
                             .expect("failed to execute connect command")
                     }
-                    request::Message::ListConnections => {
-                        commands::connection::ls::handle_command(&mut serializer)
-                            .await
-                            .expect("failed to execute list command")
-                    }
+                    request::Message::ListConnections => commands::connection::ls(&mut serializer)
+                        .await
+                        .expect("failed to execute list command"),
                     request::Message::CloseConnection(msg) => {
-                        commands::connection::rm::handle_command(&mut serializer, msg)
+                        commands::connection::rm(&mut serializer, msg)
                             .await
                             .expect("failed to execute list command")
                     }
 
                     request::Message::ListProcesses(msg) => {
-                        commands::processes::ls::handle_command(&mut serializer, msg)
+                        commands::process::ls(&mut serializer, msg)
                             .await
                             .expect("failed to execute process list command")
                     }

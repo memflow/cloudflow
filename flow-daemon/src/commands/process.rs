@@ -8,7 +8,7 @@ use crate::state::STATE;
 use futures::Sink;
 use std::marker::Unpin;
 
-pub async fn handle_command<S: Sink<response::Message> + Unpin>(
+pub async fn ls<S: Sink<response::Message> + Unpin>(
     frame: &mut S,
     msg: request::ListProcesses,
 ) -> Result<()> {
