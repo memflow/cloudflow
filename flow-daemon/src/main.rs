@@ -5,9 +5,8 @@ mod dto;
 use dto::*;
 
 mod state;
-use state::*;
 
-mod connection;
+mod commands;
 mod dispatch;
 
 use log::Level;
@@ -50,26 +49,31 @@ async fn main() -> Result<()> {
                 SymmetricalJson::<response::Message>::default(),
             );
 
+            // currently a client is only supposed to send a single request
             if let Some(msg) = deserializer.try_next().await.unwrap() {
                 match msg {
                     request::Message::Connect(msg) => {
-                        connection::new::handle_command(&mut serializer, msg)
+                        commands::connection::new::handle_command(&mut serializer, msg)
                             .await
                             .expect("failed to execute connect command")
                     }
-                    request::Message::ListConnections(msg) => {
-                        connection::ls::handle_command(&mut serializer, msg)
+                    request::Message::ListConnections => {
+                        commands::connection::ls::handle_command(&mut serializer)
                             .await
                             .expect("failed to execute list command")
                     }
                     request::Message::CloseConnection(msg) => {
-                        connection::rm::handle_command(&mut serializer, msg)
+                        commands::connection::rm::handle_command(&mut serializer, msg)
                             .await
                             .expect("failed to execute list command")
                     }
-                };
 
-                // currently a client is only supposed to send a single request
+                    request::Message::ListProcesses(msg) => {
+                        commands::processes::ls::handle_command(&mut serializer, msg)
+                            .await
+                            .expect("failed to execute process list command")
+                    }
+                };
             }
         });
     }

@@ -9,6 +9,7 @@ flow-daemon = { path = "../flow-daemon" }
 clap = { version = "2.33.0" }
 log = "0.4.8"
 simple_logger = "1.0.1"
+prettytable-rs = "0.8"
 
 # tokio
 tokio = { version = "0.2.0", features = ["full"] }

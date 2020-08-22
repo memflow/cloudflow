@@ -24,5 +24,6 @@ pub async fn handle_command<S: Sink<response::Message> + Unpin>(
         }
     }
 
+    info!("{}", output);
     write_log(frame, &output).await
 }

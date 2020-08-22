@@ -1,6 +1,6 @@
 mod error;
 
-mod connection;
+mod commands;
 mod dispatch;
 
 #[macro_use]
@@ -16,7 +16,8 @@ fn main() {
         .author(crate_authors!())
         .about("memflow command line interface")
         .after_help(crate_description!())
-        .subcommand(connection::command_definition())
+        .subcommand(commands::connection::command_definition())
+        .subcommand(commands::proc::command_definition())
         .get_matches();
 
     /*
@@ -31,7 +32,10 @@ fn main() {
     simple_logger::init_with_level(Level::Debug).unwrap();
 
     match matches.subcommand() {
-        (connection::COMMAND_STR, Some(subargv)) => connection::handle_command(subargv),
+        (commands::connection::COMMAND_STR, Some(subargv)) => {
+            commands::connection::handle_command(subargv)
+        }
+        (commands::proc::COMMAND_STR, Some(subargv)) => commands::proc::handle_command(subargv),
         _ => {
             // term.error(matches.usage()).unwrap();
             ::std::process::exit(1)

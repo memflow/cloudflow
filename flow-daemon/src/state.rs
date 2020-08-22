@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use lazy_static::lazy_static;
 use uuid::Uuid;
 
-use memflow_core::ConnectorInstance;
+use memflow_core::*;
 
 lazy_static! {
     pub static ref STATE: Mutex<State> = Mutex::new(State::new());
@@ -36,20 +36,31 @@ impl State {
     }
 }
 
+pub type CachedWin32Kernel = memflow_win32::Kernel<
+    CachedMemoryAccess<'static, ConnectorInstance, TimedCacheValidator>,
+    CachedVirtualTranslate<DirectTranslate, TimedCacheValidator>,
+>;
+
+pub enum Kernel {
+    Win32(CachedWin32Kernel),
+}
+
 pub struct ConnectorState {
     pub id: String,
     pub name: String,
     pub args: Option<String>,
-    pub instance: ConnectorInstance,
+    //  pub instance: ConnectorInstance,
+    pub kernel: Kernel,
 }
 
 impl ConnectorState {
-    pub fn new(id: &str, name: &str, args: Option<String>, instance: ConnectorInstance) -> Self {
+    pub fn new(id: &str, name: &str, args: Option<String>, kernel: Kernel) -> Self {
         Self {
             id: id.to_string(),
             name: name.to_string(),
             args: args.map(|a| a.to_string()),
-            instance,
+            //            instance,
+            kernel,
         }
     }
 }

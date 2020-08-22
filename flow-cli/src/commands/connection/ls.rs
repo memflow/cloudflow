@@ -1,7 +1,7 @@
 use crate::dispatch::*;
 use crate::error::Result;
 
-use clap::{App, Arg, ArgMatches, SubCommand};
+use clap::{App, ArgMatches, SubCommand};
 
 use log::trace;
 
@@ -16,12 +16,9 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
 pub fn handle_command(_matches: &ArgMatches) {
     trace!("handling command");
 
-    dispatch_request(
-        request::Message::ListConnections(request::ListConnections {}),
-        |msg| -> Result<()> {
-            println!("stuff: {:?}", msg);
-            Ok(()) // continue
-        },
-    )
+    dispatch_request(request::Message::ListConnections, |msg| -> Result<()> {
+        println!("stuff: {:?}", msg);
+        Ok(()) // continue
+    })
     .ok();
 }

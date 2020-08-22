@@ -2,7 +2,7 @@ use crate::dispatch::*;
 use crate::dto::request;
 use crate::error::{Error, Result};
 use crate::response;
-use crate::state::{new_uuid, ConnectorState, STATE};
+use crate::state::{new_uuid, ConnectorState, Kernel, STATE};
 
 use log::info;
 
@@ -30,14 +30,26 @@ pub async fn handle_command<S: Sink<response::Message> + Unpin>(
     let mut output = String::new();
 
     match create_connector(&msg) {
-        Ok(c) => {
+        Ok(conn) => {
+            // TODO: add os argument
+            // TODO: redirect log to client
+            // TODO: add cache options
+
+            // initialize kernel
+            let kernel = memflow_win32::Kernel::builder(conn)
+                .build_default_caches()
+                .build()
+                .map_err(|_| Error::Connector("unable to find kernel"))?;
+
+            output.push_str(&format!("found win32 kernel",));
+
             if let Ok(mut state) = STATE.lock() {
                 let uuid = new_uuid();
 
-                state.connectors.insert(
-                    uuid.clone(),
-                    ConnectorState::new(&uuid, &msg.name, msg.args.clone(), c),
-                );
+                let conn_state =
+                    ConnectorState::new(&uuid, &msg.name, msg.args.clone(), Kernel::Win32(kernel));
+
+                state.connectors.insert(uuid.clone(), conn_state);
 
                 output.push_str(&format!(
                     "connection created: {}\t{}\t{:?}",
@@ -58,5 +70,6 @@ pub async fn handle_command<S: Sink<response::Message> + Unpin>(
         }
     };
 
+    info!("{}", output);
     write_log(frame, &output).await
 }

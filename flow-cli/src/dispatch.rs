@@ -1,13 +1,13 @@
 use crate::error::{Error, Result};
 
-use log::info;
-
 use futures::prelude::*;
 use tokio::net::UnixStream;
 use tokio_serde::formats::*;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 use flow_daemon::{request, response};
+
+use prettytable::{format, Table};
 
 pub const SOCKET_PATH: &str = "/var/run/memflow.sock";
 
@@ -47,6 +47,15 @@ async fn dispatch_async<T: Fn(&response::Message) -> Result<()>>(
     'outer: while let Some(msg) = deserializer.try_next().await.unwrap() {
         match msg {
             response::Message::Log(msg) => println!("{}", msg.msg),
+            response::Message::Table(msg) => {
+                let mut table = Table::new();
+                table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
+                table.set_titles(msg.headers.into());
+                msg.entries.iter().for_each(|e| {
+                    table.add_row(e.into());
+                });
+                table.printstd();
+            }
             _ => {
                 // TODO: does this callback make sense?
                 if cb(&msg).is_err() {
