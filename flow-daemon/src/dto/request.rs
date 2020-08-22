@@ -10,7 +10,7 @@ pub enum Message {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Connect {
     pub name: String,
-    pub arg: Option<String>,
+    pub args: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

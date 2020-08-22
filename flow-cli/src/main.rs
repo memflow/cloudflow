@@ -28,7 +28,7 @@ fn main() {
         _ => simple_logger::init_with_level(Level::Error).unwrap(),
     }
     */
-    simple_logger::init_with_level(Level::Info).unwrap();
+    simple_logger::init_with_level(Level::Debug).unwrap();
 
     match matches.subcommand() {
         (connection::COMMAND_STR, Some(subargv)) => connection::handle_command(subargv),

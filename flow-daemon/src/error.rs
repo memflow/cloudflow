@@ -22,6 +22,8 @@ pub enum Error {
     ///
     /// Catch-all for socket write errors.
     SocketWrite,
+    /// Connector error
+    Connector(&'static str),
 }
 
 /// Convert from &str to error
@@ -41,6 +43,7 @@ impl Error {
             Error::Deserialize => ("deserialization error", None),
             Error::SocketRead => ("socket read error", None),
             Error::SocketWrite => ("socket write error", None),
+            Error::Connector(e) => ("connector error", Some(e)),
         }
     }
 

@@ -7,7 +7,7 @@ use log::trace;
 
 use flow_daemon::request;
 
-pub const COMMAND_STR: &str = "open";
+pub const COMMAND_STR: &str = "new";
 
 const CONNECTOR_NAME: &str = "CONNECTOR_NAME";
 const CONNECTOR_ARGS: &str = "CONNECTOR_ARGS";
@@ -33,12 +33,12 @@ pub fn handle_command(matches: &ArgMatches) {
     trace!("handling command");
 
     let name = matches.value_of(CONNECTOR_NAME).unwrap();
-    let arg = matches.value_of(CONNECTOR_ARGS);
+    let args = matches.value_of(CONNECTOR_ARGS);
 
     dispatch_request(
         request::Message::Connect(request::Connect {
             name: name.to_string(),
-            arg: arg.map(|s| s.to_string()),
+            args: args.map(|s| s.to_string()),
         }),
         |msg| -> Result<()> {
             println!("stuff: {:?}", msg);

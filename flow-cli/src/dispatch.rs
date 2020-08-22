@@ -23,6 +23,7 @@ async fn dispatch_async<T: Fn(&response::Message) -> Result<()>>(
     req: request::Message,
     cb: T,
 ) -> Result<()> {
+    // TODO: print error messages on connection failure
     let mut socket = UnixStream::connect(SOCKET_PATH)
         .await
         .map_err(|_| Error::IO)?;
@@ -45,7 +46,7 @@ async fn dispatch_async<T: Fn(&response::Message) -> Result<()>>(
 
     'outer: while let Some(msg) = deserializer.try_next().await.unwrap() {
         match msg {
-            response::Message::Log(msg) => info!("{}", msg.msg),
+            response::Message::Log(msg) => println!("{}", msg.msg),
             _ => {
                 // TODO: does this callback make sense?
                 if cb(&msg).is_err() {
