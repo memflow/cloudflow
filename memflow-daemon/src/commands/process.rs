@@ -2,7 +2,7 @@ use crate::dispatch::*;
 use crate::dto::request;
 use crate::error::Result;
 use crate::response;
-use crate::state::Kernel;
+use crate::state::KernelHandle;
 use crate::state::STATE;
 
 use futures::Sink;
@@ -14,9 +14,9 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(
 ) -> Result<()> {
     let mut state = STATE.lock().await;
 
-    if let Some(conn) = state.connections.get_mut(&msg.id) {
+    if let Some(conn) = state.connection_mut(&msg.id) {
         match &mut conn.kernel {
-            Kernel::Win32(kernel) => {
+            KernelHandle::Win32(kernel) => {
                 if let Ok(processes) = kernel.process_info_list() {
                     send_log_info(
                         frame,
@@ -40,9 +40,9 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(
 
                     for process in processes.iter() {
                         table.entries.push(vec![
-                            format!("{}", process.pid),
+                            process.pid.to_string(),
                             process.name.clone(),
-                            format!("{}", process.proc_arch.bits()),
+                            process.proc_arch.bits().to_string(),
                             format!("0x{:X}", process.dtb),
                             format!("0x{:X}", process.teb),
                             format!("0x{:X}", process.peb),

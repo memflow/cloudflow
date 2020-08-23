@@ -32,6 +32,53 @@ impl State {
             processes: HashMap::new(),
         }
     }
+
+    pub fn connection_add(
+        &mut self,
+        name: &str,
+        args: Option<String>,
+        alias: Option<String>,
+        kernel: KernelHandle,
+    ) -> String {
+        let id = new_uuid();
+        let conn = OpenedConnection::new(&id, alias, name, args, kernel);
+        self.connections.insert(id.clone(), conn);
+        id
+    }
+
+    pub fn connection(&self, id: &str) -> Option<&OpenedConnection> {
+        // first try to get by id
+        if self.connections.contains_key(id) {
+            self.connections.get(id)
+        } else {
+            // try using the alias
+            for c in self.connections.iter() {
+                if let Some(alias) = &c.1.alias {
+                    if alias == id {
+                        return Some(c.1);
+                    }
+                }
+            }
+            None
+        }
+    }
+
+    pub fn connection_mut(&mut self, id: &str) -> Option<&mut OpenedConnection> {
+        // first try to get by id
+        if self.connections.contains_key(id) {
+            self.connections.get_mut(id)
+        } else {
+            // try using the alias
+            for c in self.connections.iter_mut() {
+                if let Some(alias) = &c.1.alias {
+                    if alias == id {
+                        return Some(c.1);
+                    }
+                }
+            }
+            None
+        }
+    }
 }
 
 pub type CachedWin32Kernel = memflow_win32::Kernel<
@@ -39,23 +86,33 @@ pub type CachedWin32Kernel = memflow_win32::Kernel<
     CachedVirtualTranslate<DirectTranslate, TimedCacheValidator>,
 >;
 
-pub enum Kernel {
+pub enum KernelHandle {
     Win32(CachedWin32Kernel),
 }
 
 pub struct OpenedConnection {
     pub id: String,
+    pub alias: Option<String>,
+    pub refcount: usize,
     pub name: String,
     pub args: Option<String>,
-    pub kernel: Kernel,
+    pub kernel: KernelHandle,
 }
 
 impl OpenedConnection {
-    pub fn new(id: &str, name: &str, args: Option<String>, kernel: Kernel) -> Self {
+    pub fn new(
+        id: &str,
+        alias: Option<String>,
+        name: &str,
+        args: Option<String>,
+        kernel: KernelHandle,
+    ) -> Self {
         Self {
             id: id.to_string(),
+            alias,
+            refcount: 0,
             name: name.to_string(),
-            args: args.map(|a| a.to_string()),
+            args,
             kernel,
         }
     }

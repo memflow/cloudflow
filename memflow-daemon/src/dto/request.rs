@@ -14,6 +14,7 @@ pub enum Message {
 pub struct Connect {
     pub name: String,
     pub args: Option<String>,
+    pub alias: Option<String>,
     // TODO: os
 }
 

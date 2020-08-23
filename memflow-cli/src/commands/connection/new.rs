@@ -11,6 +11,7 @@ pub const COMMAND_STR: &str = "new";
 
 const CONNECTOR_NAME: &str = "CONNECTOR_NAME";
 const CONNECTOR_ARGS: &str = "CONNECTOR_ARGS";
+const CONNECTOR_ALIAS: &str = "CONNECTOR_ALIAS";
 
 pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
     SubCommand::with_name(COMMAND_STR)
@@ -27,6 +28,11 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
                 .index(2)
                 .required(false),
         )
+        .arg(
+            Arg::with_name(CONNECTOR_ALIAS)
+                .help("alias for the connection")
+                .required(false),
+        )
 }
 
 pub fn handle_command(matches: &ArgMatches) {
@@ -34,10 +40,12 @@ pub fn handle_command(matches: &ArgMatches) {
 
     let name = matches.value_of(CONNECTOR_NAME).unwrap();
     let args = matches.value_of(CONNECTOR_ARGS);
+    let alias = matches.value_of(CONNECTOR_ALIAS);
 
     dispatch_request(request::Message::Connect(request::Connect {
         name: name.to_string(),
         args: args.map(|s| s.to_string()),
+        alias: alias.map(|a| a.to_string()),
     }))
     .unwrap();
 }
