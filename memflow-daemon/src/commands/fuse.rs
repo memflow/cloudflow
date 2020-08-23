@@ -90,6 +90,7 @@ struct VirtualMemoryFileSystem {
 
 impl VirtualMemoryFileSystem {
     pub fn new(conn_id: String, uid: u32, gid: u32) -> Self {
+        let file_system = Self::create_root_folder(&conn_id);
         Self {
             conn_id,
 
@@ -97,39 +98,42 @@ impl VirtualMemoryFileSystem {
             gid,
 
             last_refresh: Instant::now(),
-            file_system: HashMap::new(),
+            file_system,
         }
     }
 
     fn update_file_system(&mut self) {
-        if self.last_refresh.elapsed() <= Duration::from_secs(1) {
-            return;
+        if self.last_refresh.elapsed() > Duration::from_secs(10) {
+            self.file_system = Self::create_root_folder(&self.conn_id);
+            self.last_refresh = Instant::now();
         }
+    }
 
-        self.file_system.clear();
+    fn create_root_folder(conn_id: &str) -> HashMap<u64, VirtualEntry> {
+        // TODO: incremental updates for changed pids
+        let mut fs = HashMap::new();
 
-        let mut root = VirtualFolder::new(0, &self.conn_id);
+        let mut root = VirtualFolder::new(0, conn_id);
 
         let mut state = state_lock_sync();
-        if let Some(conn) = state.connection_mut(&self.conn_id) {
+        if let Some(conn) = state.connection_mut(conn_id) {
             match &mut conn.kernel {
                 KernelHandle::Win32(kernel) => {
                     if let Ok(process_info) = kernel.process_info_list() {
                         for pi in process_info.iter() {
-                            root.children.push(self.create_process_folder(pi));
+                            root.children.push(Self::create_process_folder(pi, &mut fs));
                         }
                     }
                 }
             }
         }
 
-        self.file_system
-            .insert(root.inode, VirtualEntry::Folder(root));
+        fs.insert(root.inode, VirtualEntry::Folder(root));
 
-        self.last_refresh = Instant::now();
+        fs
     }
 
-    fn create_process_folder(&mut self, pi: &Win32ProcessInfo) -> u64 {
+    fn create_process_folder(pi: &Win32ProcessInfo, fs: &mut HashMap<u64, VirtualEntry>) -> u64 {
         let mut inode = INode(0);
         inode.set_pid(pi.pid as u64);
 
@@ -141,8 +145,7 @@ impl VirtualMemoryFileSystem {
         // add virtual folder inside of process?
         inode.set_mid(inode.mid() + 1);
         let modules = VirtualFolder::new(inode.0, "modules");
-        self.file_system
-            .insert(inode.0, VirtualEntry::Folder(modules));
+        fs.insert(inode.0, VirtualEntry::Folder(modules));
         prc.children.push(inode.0);
 
         /*
@@ -152,8 +155,7 @@ impl VirtualMemoryFileSystem {
         */
 
         let prc_inode = prc.inode;
-        self.file_system
-            .insert(prc_inode, VirtualEntry::Folder(prc));
+        fs.insert(prc_inode, VirtualEntry::Folder(prc));
         prc_inode
     }
 }
@@ -248,22 +250,6 @@ impl Filesystem for VirtualMemoryFileSystem {
         } else {
             reply.error(ENOENT);
         }
-
-        // root directory
-        /*
-        if parent == 1 {
-        } else {
-            reply.error(ENOENT);
-        }
-        */
-
-        /*
-        if parent == 1 && name.to_str() == Some("hello.txt") {
-            reply.entry(&TTL, &self.file_attr, 0);
-        } else {
-            reply.error(ENOENT);
-        }
-        */
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
@@ -328,15 +314,6 @@ impl Filesystem for VirtualMemoryFileSystem {
         } else {
             reply.error(ENOENT);
         }
-
-        /*
-        match ino {
-            1 => reply.attr(&TTL, &self.dir_attr),
-            2 => reply.attr(&TTL, &self.file_attr),
-            _ => reply.error(ENOENT),
-        }
-        */
-        //reply.error(ENOENT);
     }
 
     fn read(
