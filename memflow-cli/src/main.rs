@@ -17,6 +17,7 @@ fn main() {
         .about("memflow command line interface")
         .after_help(crate_description!())
         .subcommand(commands::connection::command_definition())
+        .subcommand(commands::fuse::command_definition())
         .subcommand(commands::proc::command_definition())
         .get_matches();
 
@@ -35,6 +36,7 @@ fn main() {
         (commands::connection::COMMAND_STR, Some(subargv)) => {
             commands::connection::handle_command(subargv)
         }
+        (commands::fuse::COMMAND_STR, Some(subargv)) => commands::fuse::handle_command(subargv),
         (commands::proc::COMMAND_STR, Some(subargv)) => commands::proc::handle_command(subargv),
         _ => {
             // term.error(matches.usage()).unwrap();

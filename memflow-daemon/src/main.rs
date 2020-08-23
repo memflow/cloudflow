@@ -66,6 +66,11 @@ async fn main() -> Result<()> {
                             .expect("failed to execute list command")
                     }
 
+                    // TODO: make os specific
+                    request::Message::FuseMount(msg) => commands::fuse::mount(&mut serializer, msg)
+                        .await
+                        .expect("failed to execute fuse mount command"),
+
                     request::Message::ListProcesses(msg) => {
                         commands::process::ls(&mut serializer, msg)
                             .await

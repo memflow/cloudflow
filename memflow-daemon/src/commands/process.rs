@@ -50,20 +50,19 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(
                     }
 
                     send_table(frame, table).await?;
+                    send_ok(frame).await
                 } else {
-                    send_log_error(
+                    send_err(
                         frame,
                         &format!("could not get processes on connection {}", msg.id),
                     )
-                    .await?;
+                    .await
                 }
             }
         }
     } else {
-        send_log_error(frame, &format!("no connection with id {} found", msg.id)).await?;
+        send_err(frame, &format!("no connection with id {} found", msg.id)).await
     }
-
-    send_ok(frame).await
 }
 
 /*
