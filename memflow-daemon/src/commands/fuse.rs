@@ -21,9 +21,8 @@ use fuse::{
 use libc::ENOENT;
 use std::ffi::OsStr;
 
-const TTL: Duration = Duration::from_secs(1); // 1 second
-
-const HELLO_TXT_CONTENT: &str = "Hello World!\n";
+// 1 second file system ttl
+const TTL: Duration = Duration::from_secs(1);
 
 bitfield! {
     pub struct INode(u64);
@@ -148,11 +147,17 @@ impl VirtualMemoryFileSystem {
         fs.insert(inode.0, VirtualEntry::Folder(modules));
         prc.children.push(inode.0);
 
-        /*
-            inode.set_mid(inode.mid() + 1);
-            prc.entries
-                .push(VirtualEntry::Folder(VirtualFolder::new(INode(inode.0), "modules")));
-        */
+        inode.set_mid(inode.mid() + 1);
+        let info = VirtualFile {
+            inode: inode.0,
+            name: "info".to_string(),
+            get_size: Box::new(|| -> u64 { "this is a test\nthis is another test\n".len() as u64 }),
+            get_contents: Box::new(|| -> Vec<u8> {
+                "this is a test\nthis is another test\n".as_bytes().to_vec()
+            }),
+        };
+        fs.insert(inode.0, VirtualEntry::File(info));
+        prc.children.push(inode.0);
 
         let prc_inode = prc.inode;
         fs.insert(prc_inode, VirtualEntry::Folder(prc));
@@ -162,11 +167,6 @@ impl VirtualMemoryFileSystem {
 
 impl Filesystem for VirtualMemoryFileSystem {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        println!("---------------");
-        println!("lookup: parent={}, name={}", parent, name.to_string_lossy());
-        println!("---------------");
-
-        // TODO: incremental updates
         self.update_file_system();
 
         if let Some(entry) = self.file_system.get(&(parent - 1)) {
@@ -217,7 +217,7 @@ impl Filesystem for VirtualMemoryFileSystem {
                                             &TTL,
                                             &FileAttr {
                                                 ino: 1 + child_file.inode,
-                                                size: 13,  // TODO:
+                                                size: (child_file.get_size)(),
                                                 blocks: 1, // TODO:
                                                 atime: UNIX_EPOCH,
                                                 mtime: UNIX_EPOCH,
@@ -253,11 +253,6 @@ impl Filesystem for VirtualMemoryFileSystem {
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-        println!("---------------");
-        println!("getattr: ino={}", ino);
-        println!("---------------");
-
-        // TODO: incremental updates
         self.update_file_system();
 
         if let Some(entry) = self.file_system.get(&(ino - 1)) {
@@ -330,8 +325,24 @@ impl Filesystem for VirtualMemoryFileSystem {
             ino, _fh, offset, _size
         );
 
-        if ino == 2 {
-            reply.data(&HELLO_TXT_CONTENT.as_bytes()[offset as usize..]);
+        if let Some(entry) = self.file_system.get(&(ino - 1)) {
+            info!(
+                "getattr(): found file system entry: {} {}",
+                entry.inode(),
+                entry.name()
+            );
+
+            match entry {
+                VirtualEntry::Folder(_folder) => {
+                    // should not happen
+                    reply.error(ENOENT);
+                }
+                VirtualEntry::File(file) => {
+                    // get file contents :)
+                    let contents = (file.get_contents)();
+                    reply.data(&contents.as_slice()[offset as usize..]);
+                }
+            }
         } else {
             reply.error(ENOENT);
         }
@@ -345,11 +356,6 @@ impl Filesystem for VirtualMemoryFileSystem {
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
-        println!("---------------");
-        println!("readdir: ino={}, fh={}, offset={}", ino, _fh, offset);
-        println!("---------------");
-
-        // TODO: incremental updates
         self.update_file_system();
 
         if let Some(entry) = self.file_system.get(&(ino - 1)) {
