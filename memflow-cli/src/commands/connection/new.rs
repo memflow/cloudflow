@@ -31,6 +31,9 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
         .arg(
             Arg::with_name(CONNECTOR_ALIAS)
                 .help("alias for the connection")
+                .long("alias")
+                .short("a")
+                .takes_value(true)
                 .required(false),
         )
 }

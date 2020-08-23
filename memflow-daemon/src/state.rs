@@ -22,6 +22,8 @@ pub fn new_uuid() -> String {
 /// Contains the entire global state of the daemon.
 pub struct State {
     pub connections: HashMap<String, OpenedConnection>,
+    pub connection_aliases: HashMap<String, String>,
+
     pub processes: HashMap<String, OpenedProcess>,
 }
 
@@ -29,6 +31,8 @@ impl State {
     pub fn new() -> Self {
         Self {
             connections: HashMap::new(),
+            connection_aliases: HashMap::new(),
+
             processes: HashMap::new(),
         }
     }
@@ -39,26 +43,35 @@ impl State {
         args: Option<String>,
         alias: Option<String>,
         kernel: KernelHandle,
-    ) -> String {
+    ) -> Result<String> {
+        if alias.is_some()
+            && self
+                .connection_aliases
+                .contains_key(alias.as_ref().unwrap())
+        {
+            return Err(Error::Connector(
+                "a connection with this alias already exists",
+            ));
+        }
+
         let id = new_uuid();
-        let conn = OpenedConnection::new(&id, alias, name, args, kernel);
+        let conn = OpenedConnection::new(&id, alias.clone(), name, args, kernel);
+
         self.connections.insert(id.clone(), conn);
-        id
+        if let Some(a) = alias {
+            self.connection_aliases.insert(a, id.clone());
+        }
+
+        Ok(id)
     }
 
     pub fn connection(&self, id: &str) -> Option<&OpenedConnection> {
         // first try to get by id
         if self.connections.contains_key(id) {
             self.connections.get(id)
+        } else if let Some(real_id) = self.connection_aliases.get(id) {
+            self.connections.get(real_id)
         } else {
-            // try using the alias
-            for c in self.connections.iter() {
-                if let Some(alias) = &c.1.alias {
-                    if alias == id {
-                        return Some(c.1);
-                    }
-                }
-            }
             None
         }
     }
@@ -67,17 +80,30 @@ impl State {
         // first try to get by id
         if self.connections.contains_key(id) {
             self.connections.get_mut(id)
+        } else if let Some(real_id) = self.connection_aliases.get(id) {
+            self.connections.get_mut(real_id)
         } else {
-            // try using the alias
-            for c in self.connections.iter_mut() {
-                if let Some(alias) = &c.1.alias {
-                    if alias == id {
-                        return Some(c.1);
-                    }
-                }
-            }
             None
         }
+    }
+
+    pub fn connection_remove(&mut self, id: &str) -> Result<()> {
+        let (id, alias) = if let Some(conn) = self.connection(id) {
+            if conn.refcount == 0 {
+                (conn.id.clone(), conn.alias.clone())
+            } else {
+                return Err(Error::Connector("connection still has open references"));
+            }
+        } else {
+            return Err(Error::Connector("connection not found"));
+        };
+
+        if let Some(alias) = &alias {
+            self.connection_aliases.remove(alias);
+        }
+        self.connections.remove(&id);
+
+        Ok(())
     }
 }
 

@@ -43,20 +43,31 @@ pub async fn new<S: Sink<response::Message> + Unpin>(
 
             let mut state = STATE.lock().await;
 
-            let id = state.connection_add(
+            match state.connection_add(
                 &msg.name,
                 msg.args.clone(),
                 msg.alias,
                 KernelHandle::Win32(kernel),
-            );
-
-            send_log_info(
-                frame,
-                &format!("connection created: {} | {} | {:?}", id, msg.name, msg.args),
-            )
-            .await?;
-
-            send_ok(frame).await
+            ) {
+                Ok(id) => {
+                    send_log_info(
+                        frame,
+                        &format!("connection created: {} | {} | {:?}", id, msg.name, msg.args),
+                    )
+                    .await?;
+                    send_ok(frame).await
+                }
+                Err(err) => {
+                    send_err(
+                        frame,
+                        &format!(
+                            "could not create connector: {} | {:?} ({})",
+                            msg.name, msg.args, err
+                        ),
+                    )
+                    .await
+                }
+            }
         }
         Err(err) => {
             send_err(
@@ -87,6 +98,7 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()>
         let mut table = response::Table::default();
         table.headers = vec![
             "id".to_string(),
+            "alias".to_string(),
             "refs".to_string(),
             "name".to_string(),
             "args".to_string(),
@@ -95,6 +107,10 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()>
         for c in state.connections.iter() {
             let entry = vec![
                 c.1.id.to_string(),
+                c.1.alias
+                    .as_ref()
+                    .map(|a| a.to_string())
+                    .unwrap_or_default(),
                 c.1.refcount.to_string(),
                 c.1.name.to_string(),
                 c.1.args.as_ref().map(|a| a.to_string()).unwrap_or_default(),
@@ -114,27 +130,17 @@ pub async fn rm<S: Sink<response::Message> + Unpin>(
 ) -> Result<()> {
     let mut state = STATE.lock().await;
 
-    let conn = if let Some(conn) = state.connection(&msg.id) {
-        Some((conn.id.clone(), conn.refcount))
-    } else {
-        None
-    };
-
-    if let Some(c) = conn {
-        if c.1 == 0 {
-            state.connections.remove(&c.0);
+    match state.connection_remove(&msg.id) {
+        Ok(_) => {
             send_log_info(frame, &format!("connection {} removed", msg.id)).await?;
             send_ok(frame).await
-        } else {
+        }
+        Err(err) => {
             send_err(
                 frame,
-                &format!("connection with id {} still has open references", msg.id),
+                &format!("unable to remove connection {}: {}", msg.id, err),
             )
-            .await?;
-            return Ok(());
+            .await
         }
-    } else {
-        send_err(frame, &format!("no connection with id {} found", msg.id)).await?;
-        return Ok(());
     }
 }
