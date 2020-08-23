@@ -28,3 +28,4 @@ time = "0.1"
 # fuse
 fuse = { git = "https://github.com/zargony/fuse-rs" }
 libc = "0.2.51"
+bitfield = "0.13.2"

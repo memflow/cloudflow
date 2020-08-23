@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 
 use lazy_static::lazy_static;
 use uuid::Uuid;
@@ -8,6 +8,11 @@ use memflow_core::*;
 
 lazy_static! {
     pub static ref STATE: Mutex<State> = Mutex::new(State::new());
+}
+
+pub fn state_lock_sync<'a>() -> MutexGuard<'a, State> {
+    let mut rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(STATE.lock())
 }
 
 pub fn new_uuid() -> String {
