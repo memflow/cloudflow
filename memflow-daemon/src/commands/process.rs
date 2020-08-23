@@ -12,19 +12,9 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(
     frame: &mut S,
     msg: request::ListProcesses,
 ) -> Result<()> {
-    let mut table = response::Table::default();
-    table.headers = vec![
-        "pid".to_string(),
-        "name".to_string(),
-        "bits".to_string(),
-        "dtb".to_string(),
-        "teb".to_string(),
-        "peb".to_string(),
-    ];
-
     let mut state = STATE.lock().await;
 
-    if let Some(conn) = state.connectors.get_mut(&msg.id) {
+    if let Some(conn) = state.connections.get_mut(&msg.id) {
         match &mut conn.kernel {
             Kernel::Win32(kernel) => {
                 if let Ok(processes) = kernel.process_info_list() {
@@ -38,6 +28,16 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(
                     )
                     .await?;
 
+                    let mut table = response::Table::default();
+                    table.headers = vec![
+                        "pid".to_string(),
+                        "name".to_string(),
+                        "bits".to_string(),
+                        "dtb".to_string(),
+                        "teb".to_string(),
+                        "peb".to_string(),
+                    ];
+
                     for process in processes.iter() {
                         table.entries.push(vec![
                             format!("{}", process.pid),
@@ -48,6 +48,8 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(
                             format!("0x{:X}", process.peb),
                         ]);
                     }
+
+                    send_table(frame, table).await?;
                 } else {
                     send_log_error(
                         frame,
@@ -61,6 +63,79 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(
         send_log_error(frame, &format!("no connection with id {} found", msg.id)).await?;
     }
 
-    send_table(frame, table).await?;
+    send_ok(frame).await
+}
+
+/*
+pub async fn open<S: Sink<response::Message> + Unpin>(
+    frame: &mut S,
+    msg: request::Connect,
+) -> Result<()> {
+    let mut state = STATE.lock().await;
+
+    if let Some(conn) = state.connections.get_mut(&msg.id) {
+        match &mut conn.kernel {
+            Kernel::Win32(kernel) => {
+
+                kernel.process_info(name)
+
+            }
+        }
+    } else {
+        send_log_error(frame, &format!("no connection with id {} found", msg.id)).await?;
+    }
+
+    send_eof(frame).await
+
+
+
+
+    match create_connector(&msg) {
+        Ok(conn) => {
+            // TODO: add os argument
+            // TODO: redirect log to client
+            // TODO: add cache options
+
+            send_log_info(frame, "connector created").await?;
+
+            // initialize kernel
+            let kernel = memflow_win32::Kernel::builder(conn)
+                .build_default_caches()
+                .build()
+                .map_err(|_| Error::Connector("unable to find kernel"))?;
+
+            send_log_info(frame, "found win32 kernel").await?;
+
+            let mut state = STATE.lock().await;
+
+            let uuid = new_uuid();
+
+            let opened_connection =
+                OpenedConnection::new(&uuid, &msg.name, msg.args.clone(), Kernel::Win32(kernel));
+
+            state.connections.insert(uuid.clone(), opened_connection);
+
+            send_log_info(
+                frame,
+                &format!(
+                    "connection created: {} | {} | {:?}",
+                    uuid, msg.name, msg.args
+                ),
+            )
+            .await?;
+        }
+        Err(err) => {
+            send_log_error(
+                frame,
+                &format!(
+                    "could not create connector: {} | {:?} ({})",
+                    msg.name, msg.args, err
+                ),
+            )
+            .await?;
+        }
+    };
+
     send_eof(frame).await
 }
+*/

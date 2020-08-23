@@ -2,7 +2,7 @@ use crate::dispatch::*;
 use crate::dto::request;
 use crate::error::{Error, Result};
 use crate::response;
-use crate::state::{new_uuid, ConnectorState, Kernel, STATE};
+use crate::state::{new_uuid, Kernel, OpenedConnection, STATE};
 
 use futures::Sink;
 use std::marker::Unpin;
@@ -45,10 +45,10 @@ pub async fn new<S: Sink<response::Message> + Unpin>(
 
             let uuid = new_uuid();
 
-            let conn_state =
-                ConnectorState::new(&uuid, &msg.name, msg.args.clone(), Kernel::Win32(kernel));
+            let opened_connection =
+                OpenedConnection::new(&uuid, &msg.name, msg.args.clone(), Kernel::Win32(kernel));
 
-            state.connectors.insert(uuid.clone(), conn_state);
+            state.connections.insert(uuid.clone(), opened_connection);
 
             send_log_info(
                 frame,
@@ -58,39 +58,39 @@ pub async fn new<S: Sink<response::Message> + Unpin>(
                 ),
             )
             .await?;
+
+            send_ok(frame).await
         }
         Err(err) => {
-            send_log_error(
+            send_err(
                 frame,
                 &format!(
                     "could not create connector: {} | {:?} ({})",
                     msg.name, msg.args, err
                 ),
             )
-            .await?;
+            .await
         }
-    };
-
-    send_eof(frame).await
+    }
 }
 
 pub async fn ls<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()> {
     let state = STATE.lock().await;
 
-    send_log_warn(
+    send_log_info(
         frame,
         &format!(
             "listing open connections: {} connections",
-            state.connectors.len()
+            state.connections.len()
         ),
     )
     .await?;
 
-    if !state.connectors.is_empty() {
+    if !state.connections.is_empty() {
         let mut table = response::Table::default();
         table.headers = vec!["id".to_string(), "name".to_string(), "args".to_string()];
 
-        for c in state.connectors.iter() {
+        for c in state.connections.iter() {
             let entry = vec![
                 c.1.id.to_string(),
                 c.1.name.to_string(),
@@ -102,7 +102,7 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()>
         send_table(frame, table).await?;
     }
 
-    send_eof(frame).await
+    send_ok(frame).await
 }
 
 pub async fn rm<S: Sink<response::Message> + Unpin>(
@@ -111,12 +111,11 @@ pub async fn rm<S: Sink<response::Message> + Unpin>(
 ) -> Result<()> {
     let mut state = STATE.lock().await;
 
-    if state.connectors.contains_key(&msg.id) {
-        state.connectors.remove(&msg.id);
+    if state.connections.contains_key(&msg.id) {
+        state.connections.remove(&msg.id);
         send_log_info(frame, &format!("connection {} removed", msg.id)).await?;
+        send_ok(frame).await
     } else {
-        send_log_error(frame, &format!("no connection with id {} found", msg.id)).await?;
+        send_err(frame, &format!("no connection with id {} found", msg.id)).await
     }
-
-    send_eof(frame).await
 }

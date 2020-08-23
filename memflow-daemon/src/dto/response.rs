@@ -4,7 +4,7 @@ use serde_derive::*;
 pub enum Message {
     Log(Log),
     Table(Table),
-    EOF,
+    Result(CommandResult),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -19,4 +19,8 @@ pub struct Table {
     pub entries: Vec<Vec<String>>,
 }
 
-// TODO: Table
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct CommandResult {
+    pub success: bool,
+    pub msg: String,
+}

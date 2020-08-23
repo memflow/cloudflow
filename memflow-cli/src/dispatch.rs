@@ -59,7 +59,10 @@ async fn dispatch_async(req: request::Message) -> Result<()> {
                 });
                 table.printstd();
             }
-            response::Message::EOF => {
+            response::Message::Result(msg) => {
+                if !msg.success {
+                    error!("{}", msg.msg);
+                }
                 break 'outer;
             }
         };

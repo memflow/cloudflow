@@ -71,6 +71,9 @@ async fn main() -> Result<()> {
                             .await
                             .expect("failed to execute process list command")
                     }
+                    request::Message::OpenProcess(_msg) => {
+                        // TODO:
+                    }
                 };
             }
         });

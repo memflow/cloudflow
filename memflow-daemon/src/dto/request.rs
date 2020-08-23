@@ -7,6 +7,7 @@ pub enum Message {
     CloseConnection(CloseConnection),
 
     ListProcesses(ListProcesses),
+    OpenProcess(OpenProcess),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -23,5 +24,10 @@ pub struct CloseConnection {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ListProcesses {
+    pub id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct OpenProcess {
     pub id: String,
 }

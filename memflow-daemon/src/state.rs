@@ -21,17 +21,15 @@ pub fn new_uuid() -> String {
 
 /// Contains the entire global state of the daemon.
 pub struct State {
-    // loaded connectors
-    pub connectors: HashMap<String, ConnectorState>,
-    // opened process list
-
-    // etc
+    pub connections: HashMap<String, OpenedConnection>,
+    pub processes: HashMap<String, OpenedProcess>,
 }
 
 impl State {
     pub fn new() -> Self {
         Self {
-            connectors: HashMap::new(),
+            connections: HashMap::new(),
+            processes: HashMap::new(),
         }
     }
 }
@@ -45,22 +43,32 @@ pub enum Kernel {
     Win32(CachedWin32Kernel),
 }
 
-pub struct ConnectorState {
+pub struct OpenedConnection {
     pub id: String,
     pub name: String,
     pub args: Option<String>,
-    //  pub instance: ConnectorInstance,
     pub kernel: Kernel,
 }
 
-impl ConnectorState {
+impl OpenedConnection {
     pub fn new(id: &str, name: &str, args: Option<String>, kernel: Kernel) -> Self {
         Self {
             id: id.to_string(),
             name: name.to_string(),
             args: args.map(|a| a.to_string()),
-            //            instance,
             kernel,
+        }
+    }
+}
+
+pub struct OpenedProcess {
+    pub conn_id: String,
+}
+
+impl OpenedProcess {
+    pub fn new(conn_id: &str) -> Self {
+        Self {
+            conn_id: conn_id.to_string(),
         }
     }
 }

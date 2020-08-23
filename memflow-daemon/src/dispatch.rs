@@ -69,9 +69,22 @@ pub async fn send_table<S: Sink<response::Message> + Unpin>(
         .map_err(|_| Error::IO)
 }
 
-pub async fn send_eof<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()> {
+pub async fn send_ok<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()> {
     frame
-        .send(response::Message::EOF)
+        .send(response::Message::Result(response::CommandResult {
+            success: true,
+            msg: "".to_string(),
+        }))
+        .await
+        .map_err(|_| Error::IO)
+}
+
+pub async fn send_err<S: Sink<response::Message> + Unpin>(frame: &mut S, msg: &str) -> Result<()> {
+    frame
+        .send(response::Message::Result(response::CommandResult {
+            success: false,
+            msg: msg.to_string(),
+        }))
         .await
         .map_err(|_| Error::IO)
 }
