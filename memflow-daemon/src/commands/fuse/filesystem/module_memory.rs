@@ -18,8 +18,7 @@ impl VMFSModuleMemory {
                 if let Some(conn) = state.connection_mut(&conn_id) {
                     match &mut conn.kernel {
                         KernelHandle::Win32(kernel) => {
-                            if let Ok(proc_info) = kernel.process_info_pid(*pid) {
-                                let mut process = Win32Process::with_kernel_ref(kernel, proc_info);
+                            if let Ok(mut process) = kernel.process_pid(*pid) {
                                 if let Ok(module_info) = process.module_info_from_peb(*peb_entry) {
                                     return module_info.size() as u64;
                                 }
@@ -34,8 +33,9 @@ impl VMFSModuleMemory {
         0
     }
 
-    // TODO: allow result
     pub fn contents(ctx: &VMFSScopeContext, offset: i64, size: u32) -> Vec<u8> {
+        let mut buf = vec![0u8; size as usize];
+
         match ctx {
             VMFSScopeContext::Module {
                 conn_id,
@@ -49,11 +49,11 @@ impl VMFSModuleMemory {
                             if let Ok(proc_info) = kernel.process_info_pid(*pid) {
                                 let mut process = Win32Process::with_kernel_ref(kernel, proc_info);
                                 if let Ok(module_info) = process.module_info_from_peb(*peb_entry) {
-                                    return process
+                                    process
                                         .virt_mem
-                                        .virt_read_raw(
+                                        .virt_read_raw_into(
                                             module_info.base() + offset as usize,
-                                            size as usize,
+                                            &mut buf,
                                         )
                                         .data_part()
                                         .unwrap();
@@ -66,7 +66,7 @@ impl VMFSModuleMemory {
             _ => (),
         };
 
-        Vec::new()
+        buf
     }
 }
 
