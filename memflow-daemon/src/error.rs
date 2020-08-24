@@ -24,12 +24,30 @@ pub enum Error {
     SocketWrite,
     /// Connector error
     Connector(&'static str),
+    /// memflow core error
+    Core(memflow_core::error::Error),
+    /// memflow win32 error
+    Win32(memflow_win32::error::Error),
 }
 
 /// Convert from &str to error
 impl convert::From<&'static str> for Error {
     fn from(error: &'static str) -> Self {
         Error::Other(error)
+    }
+}
+
+/// Convert from memflow_core::error::Error to error
+impl convert::From<memflow_core::error::Error> for Error {
+    fn from(error: memflow_core::error::Error) -> Self {
+        Error::Core(error)
+    }
+}
+
+/// Convert from memflow_win32::error::Error to error
+impl convert::From<memflow_win32::error::Error> for Error {
+    fn from(error: memflow_win32::error::Error) -> Self {
+        Error::Win32(error)
     }
 }
 
@@ -44,6 +62,8 @@ impl Error {
             Error::SocketRead => ("socket read error", None),
             Error::SocketWrite => ("socket write error", None),
             Error::Connector(e) => ("connector error", Some(e)),
+            Error::Core(e) => ("memflow core error", Some(e.to_str())),
+            Error::Win32(e) => ("memflow win32 error", Some(e.to_str())),
         }
     }
 

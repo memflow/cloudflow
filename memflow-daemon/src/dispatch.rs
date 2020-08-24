@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use crate::dto::response;
 use crate::error::{Error, Result};
 

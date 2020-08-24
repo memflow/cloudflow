@@ -1,6 +1,7 @@
 use super::{
     VMFSModule, VMFSModuleScope, VMFSScopeContext, VirtualEntry, VirtualFile, VirtualFileDataSource,
 };
+use crate::error::{Error, Result};
 use crate::state::{state_lock_sync, KernelHandle};
 
 pub struct VMFSProcessInfo;
@@ -29,37 +30,34 @@ impl VMFSProcessInfoDS {
         Self { ctx }
     }
 
-    fn contents_raw(&self) -> Vec<u8> {
-        let mut info = String::new();
+    fn contents_raw(&self) -> Result<Vec<u8>> {
+        if let VMFSScopeContext::Process { conn_id, pid } = &self.ctx {
+            let mut state = state_lock_sync();
+            let conn = state
+                .connection_mut(&conn_id)
+                .ok_or_else(|| Error::Other("connection not found"))?;
 
-        match &self.ctx {
-            VMFSScopeContext::Process { conn_id, pid } => {
-                let mut state = state_lock_sync();
-                if let Some(conn) = state.connection_mut(&conn_id) {
-                    match &mut conn.kernel {
-                        KernelHandle::Win32(kernel) => {
-                            if let Ok(process_info) = kernel.process_info_pid(*pid) {
-                                info.push_str(&format!("{:?}", process_info)); // TODO: impl custom Display for pi
-                            }
-                        }
-                    }
+            match &mut conn.kernel {
+                KernelHandle::Win32(kernel) => {
+                    let process_info = kernel.process_info_pid(*pid).map_err(Error::from)?;
+                    // TODO: impl custom Display for pi
+                    Ok(format!("{:?}", process_info).as_bytes().to_vec())
                 }
             }
-            _ => (),
-        };
-
-        info.as_bytes().to_vec()
+        } else {
+            Err(Error::Other("no process context supplied"))
+        }
     }
 }
 
 impl VirtualFileDataSource for VMFSProcessInfoDS {
-    fn content_length(&self) -> u64 {
-        self.contents_raw().len() as u64
+    fn content_length(&self) -> Result<u64> {
+        Ok(self.contents_raw()?.len() as u64)
     }
 
-    fn contents(&mut self, offset: i64, size: u32) -> Vec<u8> {
-        let info = self.contents_raw();
+    fn contents(&mut self, offset: i64, size: u32) -> Result<Vec<u8>> {
+        let info = self.contents_raw()?;
         let end = std::cmp::min((offset + size as i64) as usize, info.len());
-        info.as_slice()[offset as usize..end].to_vec()
+        Ok(info.as_slice()[offset as usize..end].to_vec())
     }
 }

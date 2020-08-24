@@ -1,10 +1,10 @@
 use super::{
     VMFSModule, VMFSModuleScope, VMFSScopeContext, VirtualEntry, VirtualFile, VirtualFileDataSource,
 };
+use crate::error::{Error, Result};
 use crate::state::{state_lock_sync, KernelHandle};
 
 use memflow_core::*;
-use memflow_win32::*;
 
 pub struct VMFSModuleMemory;
 
@@ -34,70 +34,65 @@ impl VMFSModuleMemoryDS {
 }
 
 impl VirtualFileDataSource for VMFSModuleMemoryDS {
-    fn content_length(&self) -> u64 {
-        match &self.ctx {
-            VMFSScopeContext::Module {
-                conn_id,
-                pid,
-                peb_entry,
-            } => {
-                let mut state = state_lock_sync();
-                if let Some(conn) = state.connection_mut(&conn_id) {
-                    match &mut conn.kernel {
-                        KernelHandle::Win32(kernel) => {
-                            if let Ok(mut process) = kernel.process_pid(*pid) {
-                                if let Ok(module_info) = process.module_info_from_peb(*peb_entry) {
-                                    return module_info.size() as u64;
-                                }
-                            }
-                        }
-                    }
+    fn content_length(&self) -> Result<u64> {
+        if let VMFSScopeContext::Module {
+            conn_id,
+            pid,
+            peb_entry,
+        } = &self.ctx
+        {
+            let mut state = state_lock_sync();
+            let conn = state
+                .connection_mut(&conn_id)
+                .ok_or_else(|| Error::Other("connection not found"))?;
+
+            match &mut conn.kernel {
+                KernelHandle::Win32(kernel) => {
+                    let mut process = kernel.process_pid(*pid).map_err(Error::from)?;
+                    let module_info = process
+                        .module_info_from_peb(*peb_entry)
+                        .map_err(Error::from)?;
+                    Ok(module_info.size() as u64)
                 }
             }
-            _ => (),
+        } else {
+            Err(Error::Other("no process context supplied"))
         }
-
-        0
     }
 
-    fn contents(&mut self, offset: i64, size: u32) -> Vec<u8> {
-        match &self.ctx {
-            VMFSScopeContext::Module {
-                conn_id,
-                pid,
-                peb_entry,
-            } => {
-                let mut state = state_lock_sync();
-                if let Some(conn) = state.connection_mut(&conn_id) {
-                    match &mut conn.kernel {
-                        KernelHandle::Win32(kernel) => {
-                            if let Ok(mut process) = kernel.process_pid(*pid) {
-                                if let Ok(module_info) = process.module_info_from_peb(*peb_entry) {
-                                    let len = std::cmp::min(
-                                        size as usize,
-                                        module_info.size() - offset as usize,
-                                    );
-                                    return if len > 0 {
-                                        process
-                                            .virt_mem
-                                            .virt_read_raw(
-                                                module_info.base() + offset as usize,
-                                                len,
-                                            )
-                                            .data_part()
-                                            .unwrap()
-                                    } else {
-                                        Vec::new()
-                                    };
-                                }
-                            }
-                        }
+    fn contents(&mut self, offset: i64, size: u32) -> Result<Vec<u8>> {
+        if let VMFSScopeContext::Module {
+            conn_id,
+            pid,
+            peb_entry,
+        } = &self.ctx
+        {
+            let mut state = state_lock_sync();
+            let conn = state
+                .connection_mut(&conn_id)
+                .ok_or_else(|| Error::Other("connection not found"))?;
+
+            match &mut conn.kernel {
+                KernelHandle::Win32(kernel) => {
+                    let mut process = kernel.process_pid(*pid).map_err(Error::from)?;
+                    let module_info = process
+                        .module_info_from_peb(*peb_entry)
+                        .map_err(Error::from)?;
+
+                    let len = std::cmp::min(size as usize, module_info.size() - offset as usize);
+                    if len > 0 {
+                        process
+                            .virt_mem
+                            .virt_read_raw(module_info.base() + offset as usize, len)
+                            .data_part()
+                            .map_err(Error::from)
+                    } else {
+                        Ok(Vec::new())
                     }
                 }
             }
-            _ => (),
-        };
-
-        Vec::new()
+        } else {
+            Err(Error::Other("no process context supplied"))
+        }
     }
 }

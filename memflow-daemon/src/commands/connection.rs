@@ -16,9 +16,8 @@ fn create_connector(msg: &request::Connect) -> Result<ConnectorInstance> {
         None => ConnectorArgs::default(),
     };
 
-    let inventory = unsafe { ConnectorInventory::try_new() }.unwrap();
-    unsafe { inventory.create_connector(&msg.name, &args) }
-        .map_err(|_| Error::Connector("unable to create connector"))
+    let inventory = unsafe { ConnectorInventory::try_new() }.map_err(Error::from)?;
+    unsafe { inventory.create_connector(&msg.name, &args) }.map_err(Error::from)
 }
 
 pub async fn new<S: Sink<response::Message> + Unpin>(

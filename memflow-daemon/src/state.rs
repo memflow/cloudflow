@@ -177,6 +177,7 @@ pub struct OpenedProcess {
 }
 
 impl OpenedProcess {
+    #[allow(unused)]
     pub fn new(conn_id: &str) -> Self {
         Self {
             conn_id: conn_id.to_string(),

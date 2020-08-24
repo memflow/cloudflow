@@ -1,6 +1,7 @@
 mod module_memory;
 mod process_info;
 
+use crate::error::{Error, Result};
 use crate::state::{state_lock_sync, KernelHandle};
 
 use bitfield::bitfield;
@@ -81,8 +82,8 @@ pub struct VirtualFile {
 
 /// A trait for providing data for a VirtualFile
 pub trait VirtualFileDataSource {
-    fn content_length(&self) -> u64;
-    fn contents(&mut self, offset: i64, size: u32) -> Vec<u8>;
+    fn content_length(&self) -> Result<u64>;
+    fn contents(&mut self, offset: i64, size: u32) -> Result<Vec<u8>>;
 }
 
 /// The scope a vmfs module uses.
@@ -109,6 +110,9 @@ pub enum VMFSScopeContext {
         peb_entry: Address,
     },
 }
+
+// TODO: maybe it would be useful to split up the VMFSModule for each scope and remove the scope argument
+// TODO: This would make it easier to customize the entry() function
 
 /// Trait describing a module of the vmfs.
 /// This is used to extend functionality of the vmfs and add files/folders in a modular way.
@@ -358,7 +362,10 @@ impl Filesystem for VirtualMemoryFileSystem {
                                             &TTL,
                                             &FileAttr {
                                                 ino: 1 + child_file.inode,
-                                                size: child_file.data_source.content_length(),
+                                                size: child_file
+                                                    .data_source
+                                                    .content_length()
+                                                    .unwrap_or_default(),
                                                 blocks: 1, // TODO:
                                                 atime: UNIX_EPOCH,
                                                 mtime: UNIX_EPOCH,
@@ -475,8 +482,11 @@ impl Filesystem for VirtualMemoryFileSystem {
 
             match entry {
                 VirtualEntry::File(file) => {
-                    let contents = file.data_source.contents(offset, size);
-                    reply.data(contents.as_slice());
+                    if let Ok(contents) = file.data_source.contents(offset, size) {
+                        reply.data(contents.as_slice());
+                    } else {
+                        reply.data(&[]);
+                    }
                 }
                 VirtualEntry::Folder(_folder) => {
                     // should never happen
