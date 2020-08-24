@@ -103,7 +103,17 @@ pub async fn umount<S: Sink<response::Message> + Unpin>(
 ) -> Result<()> {
     let mut state = STATE.lock().await;
 
+    // TODO: decrease ref counter
     if state.file_systems.contains_key(&msg.fuse_id) {
+        let conn_id = state
+            .file_systems
+            .get(&msg.fuse_id)
+            .unwrap()
+            .conn_id
+            .clone();
+        if let Some(conn) = state.connection_mut(&conn_id) {
+            conn.refcount -= 1;
+        }
         state.file_systems.remove(&msg.fuse_id);
         send_ok(frame).await
     } else {
