@@ -75,10 +75,14 @@ impl VirtualFolder {
 pub struct VirtualFile {
     pub inode: u64,
     pub name: String,
+    // TODO: decide wether to go generic or trait object way?
+    pub data_source: Box<dyn VirtualFileDataSource>,
+}
 
-    // TODO: callbacks for size/contents/etc
-    pub content_length: Box<dyn Fn() -> u64>,
-    pub contents: Box<dyn Fn(i64, u32) -> Vec<u8>>,
+/// A trait for providing data for a VirtualFile
+pub trait VirtualFileDataSource {
+    fn content_length(&self) -> u64;
+    fn contents(&mut self, offset: i64, size: u32) -> Vec<u8>;
 }
 
 /// The scope a vmfs module uses.
@@ -354,7 +358,7 @@ impl Filesystem for VirtualMemoryFileSystem {
                                             &TTL,
                                             &FileAttr {
                                                 ino: 1 + child_file.inode,
-                                                size: (child_file.content_length)(),
+                                                size: child_file.data_source.content_length(),
                                                 blocks: 1, // TODO:
                                                 atime: UNIX_EPOCH,
                                                 mtime: UNIX_EPOCH,
@@ -462,7 +466,7 @@ impl Filesystem for VirtualMemoryFileSystem {
             ino, _fh, offset, size
         );
 
-        if let Some(entry) = self.file_system.get(&(ino - 1)) {
+        if let Some(entry) = self.file_system.get_mut(&(ino - 1)) {
             info!(
                 "getattr(): found file system entry: {} {}",
                 entry.inode(),
@@ -470,15 +474,13 @@ impl Filesystem for VirtualMemoryFileSystem {
             );
 
             match entry {
-                VirtualEntry::Folder(_folder) => {
-                    // should not happen
-                    reply.error(ENOENT);
-                }
                 VirtualEntry::File(file) => {
-                    // get file contents :)
-                    // TODO: use offset + size
-                    let contents = (file.contents)(offset, size);
+                    let contents = file.data_source.contents(offset, size);
                     reply.data(contents.as_slice());
+                }
+                VirtualEntry::Folder(_folder) => {
+                    // should never happen
+                    reply.error(ENOENT);
                 }
             }
         } else {

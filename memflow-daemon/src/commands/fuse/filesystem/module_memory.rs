@@ -1,4 +1,6 @@
-use super::{VMFSModule, VMFSModuleScope, VMFSScopeContext, VirtualEntry, VirtualFile};
+use super::{
+    VMFSModule, VMFSModuleScope, VMFSScopeContext, VirtualEntry, VirtualFile, VirtualFileDataSource,
+};
 use crate::state::{state_lock_sync, KernelHandle};
 
 use memflow_core::*;
@@ -6,9 +8,34 @@ use memflow_win32::*;
 
 pub struct VMFSModuleMemory;
 
-impl VMFSModuleMemory {
-    pub fn content_length(ctx: &VMFSScopeContext) -> u64 {
-        match ctx {
+impl VMFSModule for VMFSModuleMemory {
+    fn scope(&self) -> VMFSModuleScope {
+        VMFSModuleScope::Module
+    }
+
+    // TODO: cache contents size ?
+    fn entry(&self, inode: u64, ctx: VMFSScopeContext) -> VirtualEntry {
+        VirtualEntry::File(VirtualFile {
+            inode,
+            name: "memory".to_string(),
+            data_source: Box::new(VMFSModuleMemoryDS::new(ctx)),
+        })
+    }
+}
+
+struct VMFSModuleMemoryDS {
+    ctx: VMFSScopeContext,
+}
+
+impl VMFSModuleMemoryDS {
+    pub fn new(ctx: VMFSScopeContext) -> Self {
+        Self { ctx }
+    }
+}
+
+impl VirtualFileDataSource for VMFSModuleMemoryDS {
+    fn content_length(&self) -> u64 {
+        match &self.ctx {
             VMFSScopeContext::Module {
                 conn_id,
                 pid,
@@ -33,8 +60,8 @@ impl VMFSModuleMemory {
         0
     }
 
-    pub fn contents(ctx: &VMFSScopeContext, offset: i64, size: u32) -> Vec<u8> {
-        match ctx {
+    fn contents(&mut self, offset: i64, size: u32) -> Vec<u8> {
+        match &self.ctx {
             VMFSScopeContext::Module {
                 conn_id,
                 pid,
@@ -72,22 +99,5 @@ impl VMFSModuleMemory {
         };
 
         Vec::new()
-    }
-}
-
-impl VMFSModule for VMFSModuleMemory {
-    fn scope(&self) -> VMFSModuleScope {
-        VMFSModuleScope::Module
-    }
-
-    // TODO: cache contents size ?
-    fn entry(&self, inode: u64, ctx: VMFSScopeContext) -> VirtualEntry {
-        let ctx_clone = ctx.clone();
-        VirtualEntry::File(VirtualFile {
-            inode,
-            name: "memory".to_string(),
-            content_length: Box::new(move || Self::content_length(&ctx)),
-            contents: Box::new(move |offset, size| Self::contents(&ctx_clone, offset, size)),
-        })
     }
 }

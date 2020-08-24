@@ -1,24 +1,38 @@
-use super::{VMFSModule, VMFSModuleScope, VMFSScopeContext, VirtualEntry, VirtualFile};
+use super::{
+    VMFSModule, VMFSModuleScope, VMFSScopeContext, VirtualEntry, VirtualFile, VirtualFileDataSource,
+};
 use crate::state::{state_lock_sync, KernelHandle};
 
 pub struct VMFSProcessInfo;
 
-impl VMFSProcessInfo {
-    pub fn content_length(ctx: &VMFSScopeContext) -> u64 {
-        Self::contents_raw(ctx).len() as u64
+impl VMFSModule for VMFSProcessInfo {
+    fn scope(&self) -> VMFSModuleScope {
+        VMFSModuleScope::Process
     }
 
-    // TODO: allow result
-    pub fn contents(ctx: &VMFSScopeContext, offset: i64, size: u32) -> Vec<u8> {
-        let info = Self::contents_raw(ctx);
-        let end = std::cmp::min((offset + size as i64) as usize, info.len());
-        info.as_slice()[offset as usize..end].to_vec()
+    // TODO: cache contents size ?
+    fn entry(&self, inode: u64, ctx: VMFSScopeContext) -> VirtualEntry {
+        VirtualEntry::File(VirtualFile {
+            inode,
+            name: "process_info".to_string(),
+            data_source: Box::new(VMFSProcessInfoDS::new(ctx)),
+        })
+    }
+}
+
+struct VMFSProcessInfoDS {
+    ctx: VMFSScopeContext,
+}
+
+impl VMFSProcessInfoDS {
+    pub fn new(ctx: VMFSScopeContext) -> Self {
+        Self { ctx }
     }
 
-    fn contents_raw(ctx: &VMFSScopeContext) -> Vec<u8> {
+    fn contents_raw(&self) -> Vec<u8> {
         let mut info = String::new();
 
-        match ctx {
+        match &self.ctx {
             VMFSScopeContext::Process { conn_id, pid } => {
                 let mut state = state_lock_sync();
                 if let Some(conn) = state.connection_mut(&conn_id) {
@@ -38,19 +52,14 @@ impl VMFSProcessInfo {
     }
 }
 
-impl VMFSModule for VMFSProcessInfo {
-    fn scope(&self) -> VMFSModuleScope {
-        VMFSModuleScope::Process
+impl VirtualFileDataSource for VMFSProcessInfoDS {
+    fn content_length(&self) -> u64 {
+        self.contents_raw().len() as u64
     }
 
-    // TODO: cache contents size ?
-    fn entry(&self, inode: u64, ctx: VMFSScopeContext) -> VirtualEntry {
-        let ctx_clone = ctx.clone();
-        VirtualEntry::File(VirtualFile {
-            inode,
-            name: "process_info".to_string(),
-            content_length: Box::new(move || Self::content_length(&ctx)),
-            contents: Box::new(move |offset, size| Self::contents(&ctx_clone, offset, size)),
-        })
+    fn contents(&mut self, offset: i64, size: u32) -> Vec<u8> {
+        let info = self.contents_raw();
+        let end = std::cmp::min((offset + size as i64) as usize, info.len());
+        info.as_slice()[offset as usize..end].to_vec()
     }
 }
