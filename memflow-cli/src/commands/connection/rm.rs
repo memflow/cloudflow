@@ -1,5 +1,4 @@
 use crate::dispatch::*;
-use crate::error::Result;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 

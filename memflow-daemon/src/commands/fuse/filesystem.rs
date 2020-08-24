@@ -1,3 +1,4 @@
+mod module_memory;
 mod process_info;
 
 use crate::state::{state_lock_sync, KernelHandle};
@@ -8,6 +9,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use log::{info, trace};
 
+use memflow_core::{Address, VirtualMemory};
 use memflow_win32::*;
 
 use fuse::{
@@ -19,13 +21,14 @@ use std::ffi::OsStr;
 /// Default file TTL
 const TTL: Duration = Duration::from_secs(1);
 
-/// Describes an INode in the VMFS
-/// This bitfield struct is used to ensure that processes with the same PID end up with the same inodes.
 bitfield! {
+    /// Describes an INode in the VMFS
+    /// This bitfield struct is used to ensure that processes with the same PID end up with the same inodes.
     pub struct INode(u64);
     impl Debug;
     pub pid, set_pid: 31, 0;
-    pub mid, set_mid: 63, 32;
+    pub mid, set_mid: 47, 32;
+    pub id, set_id: 63, 48;
 }
 
 /// Entries of the vmfs can either be Files or Folders.
@@ -75,7 +78,7 @@ pub struct VirtualFile {
 
     // TODO: callbacks for size/contents/etc
     pub content_length: Box<dyn Fn() -> u64>,
-    pub contents: Box<dyn Fn() -> Vec<u8>>,
+    pub contents: Box<dyn Fn(i64, u32) -> Vec<u8>>,
 }
 
 /// The scope a vmfs module uses.
@@ -89,9 +92,18 @@ pub enum VMFSModuleScope {
 /// It contains information such as connection id, process id, etc.
 #[derive(Debug, Clone)]
 pub enum VMFSScopeContext {
-    Connection { conn_id: String },
-    Process { conn_id: String, pid: i32 },
-    Module { conn_id: String, pid: i32, mid: u8 },
+    Connection {
+        conn_id: String,
+    },
+    Process {
+        conn_id: String,
+        pid: i32,
+    },
+    Module {
+        conn_id: String,
+        pid: i32,
+        peb_entry: Address,
+    },
 }
 
 /// Trait describing a module of the vmfs.
@@ -134,7 +146,7 @@ impl VirtualMemoryFileSystem {
 
             modules_connections: Vec::new(),
             modules_processes: vec![Box::new(process_info::VMFSProcessInfo)],
-            modules_modules: Vec::new(),
+            modules_modules: vec![Box::new(module_memory::VMFSModuleMemory)],
         };
 
         // initialize file_system
@@ -152,60 +164,141 @@ impl VirtualMemoryFileSystem {
 
     fn create_root_folder(&self) -> HashMap<u64, VirtualEntry> {
         // TODO: incremental updates for changed pids
-        let mut fs = HashMap::new();
+        let mut file_system = HashMap::new();
 
-        let mut root = VirtualFolder::new(0, &self.conn_id);
+        let mut inode = INode(0);
+        let mut root_folder = VirtualFolder::new(inode.0, &self.conn_id);
 
+        let ctx = VMFSScopeContext::Connection {
+            conn_id: self.conn_id.clone(),
+        };
+
+        // add all vmfs modules for the connection scope
+        // inode for connection entries is: 0-0-x
+        inode.set_mid(0);
+        for module in self.modules_connections.iter() {
+            inode.set_id(inode.id() + 1);
+            let fse = module.entry(inode.0, ctx.clone()); // TODO: handle recursive entries for folders+subfolders
+
+            // insert entry into filesystem and process
+            file_system.insert(inode.0, fse);
+            root_folder.children.push(inode.0);
+        }
+
+        // inode for process entries is: pid-x-x
         let mut state = state_lock_sync();
         if let Some(conn) = state.connection_mut(&self.conn_id) {
             match &mut conn.kernel {
                 KernelHandle::Win32(kernel) => {
                     if let Ok(process_info) = kernel.process_info_list() {
                         for pi in process_info.iter() {
-                            root.children.push(self.create_process_folder(pi, &mut fs));
+                            let process = Win32Process::with_kernel_ref(kernel, pi.clone());
+                            inode.set_pid(process.proc_info.pid as u64);
+                            root_folder.children.push(self.create_process_folder(
+                                INode(inode.0),
+                                process,
+                                &mut file_system,
+                            ));
                         }
                     }
                 }
             }
         }
 
-        fs.insert(root.inode, VirtualEntry::Folder(root));
+        file_system.insert(root_folder.inode, VirtualEntry::Folder(root_folder));
 
-        fs
+        file_system
     }
 
-    fn create_process_folder(
+    fn create_process_folder<T>(
         &self,
-        pi: &Win32ProcessInfo,
-        fs: &mut HashMap<u64, VirtualEntry>,
-    ) -> u64 {
-        let mut inode = INode(0);
-        inode.set_pid(pi.pid as u64);
-
-        let mut prc = VirtualFolder::new(
+        mut inode: INode,
+        mut process: Win32Process<T>,
+        file_system: &mut HashMap<u64, VirtualEntry>,
+    ) -> u64
+    where
+        T: VirtualMemory,
+    {
+        let mut proc_folder = VirtualFolder::new(
             inode.0,
-            &format!("{}_{}", pi.pid, pi.name.replace(".", "_")),
+            &format!(
+                "{}_{}",
+                process.proc_info.pid,
+                process.proc_info.name.replace(".", "_")
+            ),
         );
 
         let ctx = VMFSScopeContext::Process {
             conn_id: self.conn_id.clone(),
-            pid: pi.pid,
+            pid: process.proc_info.pid,
         };
 
-        // add module scope
+        // add all vmfs modules for the process scope
+        // inode for process module entries is: pid-0-x
+        inode.set_mid(0);
         for module in self.modules_processes.iter() {
-            // instantiate entry
-            inode.set_mid(inode.mid() + 1);
-            let fse = module.entry(inode.0, ctx.clone());
+            // instantiate entry with a new id
+            inode.set_id(inode.id() + 1);
+            let fse = module.entry(inode.0, ctx.clone()); // TODO: handle recursive entries for folders+subfolders
 
             // insert entry into filesystem and process
-            fs.insert(inode.0, fse);
-            prc.children.push(inode.0);
+            file_system.insert(inode.0, fse);
+            proc_folder.children.push(inode.0);
         }
 
-        let prc_inode = prc.inode;
-        fs.insert(prc_inode, VirtualEntry::Folder(prc));
+        // add all modules for this process
+        // inode for module entries is: pid-x-y
+        if let Ok(modules) = process.module_info_list() {
+            for mi in modules.iter() {
+                inode.set_mid(inode.mid() + 1); // increase mid for each module
+                proc_folder.children.push(self.create_module_folder(
+                    INode(inode.0),
+                    &process.proc_info,
+                    mi,
+                    file_system,
+                ));
+            }
+        }
+
+        let prc_inode = proc_folder.inode;
+        file_system.insert(prc_inode, VirtualEntry::Folder(proc_folder));
         prc_inode
+    }
+
+    fn create_module_folder(
+        &self,
+        mut inode: INode,
+        proc_info: &Win32ProcessInfo,
+        mod_info: &Win32ModuleInfo,
+        file_system: &mut HashMap<u64, VirtualEntry>,
+    ) -> u64 {
+        inode.set_id(0);
+
+        let mut module_folder = VirtualFolder::new(
+            inode.0,
+            &format!("{}_{}", mod_info.base, mod_info.name.replace(".", "_")),
+        );
+
+        let ctx = VMFSScopeContext::Module {
+            conn_id: self.conn_id.clone(),
+            pid: proc_info.pid,
+            peb_entry: mod_info.peb_entry,
+        };
+
+        // add all vmfs modules for the module scope
+        for module in self.modules_modules.iter() {
+            // instantiate entry with a new id
+            inode.set_id(inode.id() + 1);
+            let fse = module.entry(inode.0, ctx.clone()); // TODO: handle recursive entries for folders+subfolders
+
+            // insert entry into filesystem and process
+            file_system.insert(inode.0, fse);
+            module_folder.children.push(inode.0);
+        }
+
+        let module_inode = module_folder.inode;
+        file_system.insert(module_inode, VirtualEntry::Folder(module_folder));
+        module_inode
     }
 }
 
@@ -361,12 +454,12 @@ impl Filesystem for VirtualMemoryFileSystem {
         ino: u64,
         _fh: u64,
         offset: i64,
-        _size: u32,
+        size: u32,
         reply: ReplyData,
     ) {
         println!(
             "read: ino={}, fh={}, offset={} size={}",
-            ino, _fh, offset, _size
+            ino, _fh, offset, size
         );
 
         if let Some(entry) = self.file_system.get(&(ino - 1)) {
@@ -383,8 +476,9 @@ impl Filesystem for VirtualMemoryFileSystem {
                 }
                 VirtualEntry::File(file) => {
                     // get file contents :)
-                    let contents = (file.contents)();
-                    reply.data(&contents.as_slice()[offset as usize..]);
+                    // TODO: use offset + size
+                    let contents = (file.contents)(offset, size);
+                    reply.data(contents.as_slice());
                 }
             }
         } else {

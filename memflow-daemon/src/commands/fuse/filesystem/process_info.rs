@@ -5,11 +5,16 @@ pub struct VMFSProcessInfo;
 
 impl VMFSProcessInfo {
     pub fn content_length(ctx: &VMFSScopeContext) -> u64 {
-        Self::contents(ctx).len() as u64
+        Self::contents_raw(ctx).len() as u64
     }
 
     // TODO: allow result
-    pub fn contents(ctx: &VMFSScopeContext) -> Vec<u8> {
+    pub fn contents(ctx: &VMFSScopeContext, offset: i64, size: u32) -> Vec<u8> {
+        let info = Self::contents_raw(ctx);
+        info.as_slice()[offset as usize..(offset + size as i64) as usize].to_vec()
+    }
+
+    fn contents_raw(ctx: &VMFSScopeContext) -> Vec<u8> {
         let mut info = String::new();
 
         match ctx {
@@ -44,7 +49,7 @@ impl VMFSModule for VMFSProcessInfo {
             inode,
             name: "process_info".to_string(),
             content_length: Box::new(move || Self::content_length(&ctx)),
-            contents: Box::new(move || Self::contents(&ctx_clone)),
+            contents: Box::new(move |offset, size| Self::contents(&ctx_clone, offset, size)),
         })
     }
 }
