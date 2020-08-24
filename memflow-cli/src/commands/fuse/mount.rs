@@ -3,6 +3,7 @@ use crate::dispatch::*;
 use clap::{App, Arg, ArgMatches, SubCommand};
 
 use log::trace;
+use std::fs;
 
 use memflow_daemon::request;
 
@@ -34,9 +35,13 @@ pub fn handle_command(matches: &ArgMatches) {
     let conn_id = matches.value_of(CONNECTION_ID).unwrap();
     let mount_point = matches.value_of(MOUNT_POINT).unwrap();
 
+    // TODO: give meaningful error messages here
+    let canonical_path = fs::canonicalize(mount_point).unwrap();
+    let full_path = canonical_path.to_str().unwrap();
+
     dispatch_request(request::Message::FuseMount(request::FuseMount {
         conn_id: conn_id.to_string(),
-        mount_point: mount_point.to_string(),
+        mount_point: full_path.to_string(),
         uid: unsafe { libc::getuid() },
         gid: unsafe { libc::getgid() },
     }))
