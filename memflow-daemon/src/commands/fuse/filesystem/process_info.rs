@@ -11,7 +11,8 @@ impl VMFSProcessInfo {
     // TODO: allow result
     pub fn contents(ctx: &VMFSScopeContext, offset: i64, size: u32) -> Vec<u8> {
         let info = Self::contents_raw(ctx);
-        info.as_slice()[offset as usize..(offset + size as i64) as usize].to_vec()
+        let end = std::cmp::min((offset + size as i64) as usize, info.len());
+        info.as_slice()[offset as usize..end].to_vec()
     }
 
     fn contents_raw(ctx: &VMFSScopeContext) -> Vec<u8> {
