@@ -14,7 +14,7 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(
 ) -> Result<()> {
     let mut state = STATE.lock().await;
 
-    if let Some(conn) = state.connection_mut(&msg.id) {
+    if let Some(conn) = state.connection_mut(&msg.conn_id) {
         match &mut conn.kernel {
             KernelHandle::Win32(kernel) => {
                 if let Ok(processes) = kernel.process_info_list() {
@@ -22,7 +22,7 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(
                         frame,
                         &format!(
                             "listing processes for connection {}: {} processes\n",
-                            msg.id,
+                            msg.conn_id,
                             processes.len(),
                         ),
                     )
@@ -54,14 +54,18 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(
                 } else {
                     send_err(
                         frame,
-                        &format!("could not get processes on connection {}", msg.id),
+                        &format!("could not get processes on connection {}", msg.conn_id),
                     )
                     .await
                 }
             }
         }
     } else {
-        send_err(frame, &format!("no connection with id {} found", msg.id)).await
+        send_err(
+            frame,
+            &format!("no connection with id {} found", msg.conn_id),
+        )
+        .await
     }
 }
 

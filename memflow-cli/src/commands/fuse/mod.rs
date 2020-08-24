@@ -1,4 +1,6 @@
+mod ls;
 mod mount;
+mod umount;
 
 use clap::{App, ArgMatches, SubCommand};
 
@@ -10,6 +12,8 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
     SubCommand::with_name(COMMAND_STR)
         .about("manages fuse virtual filesystem mount")
         .subcommand(mount::command_definition())
+        .subcommand(ls::command_definition())
+        .subcommand(umount::command_definition())
 }
 
 pub fn handle_command(matches: &ArgMatches) {
@@ -17,6 +21,8 @@ pub fn handle_command(matches: &ArgMatches) {
 
     match matches.subcommand() {
         (mount::COMMAND_STR, Some(matches)) => mount::handle_command(matches),
+        (ls::COMMAND_STR, Some(matches)) => ls::handle_command(matches),
+        (umount::COMMAND_STR, Some(matches)) => umount::handle_command(matches),
         _ => {
             //term.error(matches.usage()).unwrap();
             ::std::process::exit(1)

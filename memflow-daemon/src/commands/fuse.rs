@@ -1,427 +1,16 @@
+mod filesystem;
+use filesystem::VirtualMemoryFileSystem;
+
 use crate::dispatch::*;
 use crate::dto::request;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::response;
-use crate::state::{state_lock_sync, KernelHandle, STATE};
+use crate::state::{new_uuid, state_lock_sync, FileSystemHandle, STATE};
 
-use bitfield::bitfield;
 use futures::Sink;
-use std::collections::HashMap;
 use std::marker::Unpin;
-use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use log::{info, trace};
-
-use memflow_core::*;
-use memflow_win32::*;
-
-use fuse::{
-    FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request,
-};
-use libc::ENOENT;
 use std::ffi::OsStr;
-
-// 1 second file system ttl
-const TTL: Duration = Duration::from_secs(1);
-
-bitfield! {
-    pub struct INode(u64);
-    impl Debug;
-    pub pid, set_pid: 31, 0;
-    pub mid, set_mid: 63, 32;
-}
-
-enum VirtualEntry {
-    Folder(VirtualFolder),
-    File(VirtualFile),
-}
-
-impl VirtualEntry {
-    pub fn inode(&self) -> u64 {
-        match self {
-            VirtualEntry::Folder(folder) => folder.inode,
-            VirtualEntry::File(file) => file.inode,
-        }
-    }
-
-    pub fn name(&self) -> &str {
-        match self {
-            VirtualEntry::Folder(folder) => &folder.name,
-            VirtualEntry::File(file) => &file.name,
-        }
-    }
-}
-
-struct VirtualFolder {
-    pub inode: u64,
-    pub name: String,
-    pub children: Vec<u64>,
-}
-
-impl VirtualFolder {
-    pub fn new(inode: u64, name: &str) -> Self {
-        Self {
-            inode,
-            name: name.to_string(),
-            children: Vec::new(),
-        }
-    }
-}
-
-struct VirtualFile {
-    pub inode: u64,
-    pub name: String,
-
-    // TODO: callbacks for size/contents/etc
-    pub get_size: Box<dyn Fn() -> u64>,
-    pub get_contents: Box<dyn Fn() -> Vec<u8>>,
-}
-
-struct VirtualMemoryFileSystem {
-    conn_id: String,
-
-    uid: u32,
-    gid: u32,
-
-    last_refresh: Instant,
-    file_system: HashMap<u64, VirtualEntry>,
-}
-
-impl VirtualMemoryFileSystem {
-    pub fn new(conn_id: String, uid: u32, gid: u32) -> Self {
-        let file_system = Self::create_root_folder(&conn_id);
-        Self {
-            conn_id,
-
-            uid,
-            gid,
-
-            last_refresh: Instant::now(),
-            file_system,
-        }
-    }
-
-    fn update_file_system(&mut self) {
-        if self.last_refresh.elapsed() > Duration::from_secs(10) {
-            self.file_system = Self::create_root_folder(&self.conn_id);
-            self.last_refresh = Instant::now();
-        }
-    }
-
-    fn create_root_folder(conn_id: &str) -> HashMap<u64, VirtualEntry> {
-        // TODO: incremental updates for changed pids
-        let mut fs = HashMap::new();
-
-        let mut root = VirtualFolder::new(0, conn_id);
-
-        let mut state = state_lock_sync();
-        if let Some(conn) = state.connection_mut(conn_id) {
-            match &mut conn.kernel {
-                KernelHandle::Win32(kernel) => {
-                    if let Ok(process_info) = kernel.process_info_list() {
-                        for pi in process_info.iter() {
-                            root.children.push(Self::create_process_folder(pi, &mut fs));
-                        }
-                    }
-                }
-            }
-        }
-
-        fs.insert(root.inode, VirtualEntry::Folder(root));
-
-        fs
-    }
-
-    fn create_process_folder(pi: &Win32ProcessInfo, fs: &mut HashMap<u64, VirtualEntry>) -> u64 {
-        let mut inode = INode(0);
-        inode.set_pid(pi.pid as u64);
-
-        let mut prc = VirtualFolder::new(
-            inode.0,
-            &format!("{}_{}", pi.pid, pi.name.replace(".", "_")),
-        );
-
-        // add virtual folder inside of process?
-        inode.set_mid(inode.mid() + 1);
-        let modules = VirtualFolder::new(inode.0, "modules");
-        fs.insert(inode.0, VirtualEntry::Folder(modules));
-        prc.children.push(inode.0);
-
-        inode.set_mid(inode.mid() + 1);
-        let info = VirtualFile {
-            inode: inode.0,
-            name: "info".to_string(),
-            get_size: Box::new(|| -> u64 { "this is a test\nthis is another test\n".len() as u64 }),
-            get_contents: Box::new(|| -> Vec<u8> {
-                "this is a test\nthis is another test\n".as_bytes().to_vec()
-            }),
-        };
-        fs.insert(inode.0, VirtualEntry::File(info));
-        prc.children.push(inode.0);
-
-        let prc_inode = prc.inode;
-        fs.insert(prc_inode, VirtualEntry::Folder(prc));
-        prc_inode
-    }
-}
-
-impl Filesystem for VirtualMemoryFileSystem {
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        self.update_file_system();
-
-        if let Some(entry) = self.file_system.get(&(parent - 1)) {
-            info!(
-                "lookup(): found file system entry: {} {}",
-                entry.inode(),
-                entry.name()
-            );
-
-            match entry {
-                VirtualEntry::Folder(folder) => {
-                    // match child entries by name
-                    // TODO: maybe add a map?
-                    for child in folder.children.iter() {
-                        if let Some(child_entry) = self.file_system.get(&child) {
-                            // TODO: improve this check
-                            if child_entry.name() == name.to_string_lossy() {
-                                trace!(
-                                    "lookup(): found child entry: {} {}",
-                                    child_entry.inode(),
-                                    child_entry.name()
-                                );
-                                match child_entry {
-                                    VirtualEntry::Folder(child_folder) => {
-                                        reply.entry(
-                                            &TTL,
-                                            &FileAttr {
-                                                ino: 1 + child_folder.inode,
-                                                size: 0,
-                                                blocks: 0,
-                                                atime: UNIX_EPOCH,
-                                                mtime: UNIX_EPOCH,
-                                                ctime: UNIX_EPOCH,
-                                                crtime: UNIX_EPOCH,
-                                                kind: FileType::Directory,
-                                                perm: 0o755,
-                                                nlink: 2,
-                                                uid: self.uid,
-                                                gid: self.gid,
-                                                rdev: 0,
-                                                flags: 0,
-                                            },
-                                            0,
-                                        );
-                                    }
-                                    VirtualEntry::File(child_file) => {
-                                        reply.entry(
-                                            &TTL,
-                                            &FileAttr {
-                                                ino: 1 + child_file.inode,
-                                                size: (child_file.get_size)(),
-                                                blocks: 1, // TODO:
-                                                atime: UNIX_EPOCH,
-                                                mtime: UNIX_EPOCH,
-                                                ctime: UNIX_EPOCH,
-                                                crtime: UNIX_EPOCH,
-                                                kind: FileType::RegularFile,
-                                                perm: 0o644,
-                                                nlink: 1,
-                                                uid: self.uid,
-                                                gid: self.gid,
-                                                rdev: 0,
-                                                flags: 0,
-                                            },
-                                            0,
-                                        );
-                                    }
-                                }
-
-                                // early return, we found our entry
-                                return;
-                            }
-                        }
-                    }
-                }
-                VirtualEntry::File(_) => {
-                    // TODO: should not happen in readdir - print warn
-                    reply.error(ENOENT);
-                }
-            }
-        } else {
-            reply.error(ENOENT);
-        }
-    }
-
-    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-        self.update_file_system();
-
-        if let Some(entry) = self.file_system.get(&(ino - 1)) {
-            info!(
-                "getattr(): found file system entry: {} {}",
-                entry.inode(),
-                entry.name()
-            );
-
-            match entry {
-                VirtualEntry::Folder(folder) => {
-                    reply.attr(
-                        &TTL,
-                        &FileAttr {
-                            ino: 1 + folder.inode,
-                            size: 0,
-                            blocks: 0,
-                            atime: UNIX_EPOCH,
-                            mtime: UNIX_EPOCH,
-                            ctime: UNIX_EPOCH,
-                            crtime: UNIX_EPOCH,
-                            kind: FileType::Directory,
-                            perm: 0o755,
-                            nlink: 2,
-                            uid: self.uid,
-                            gid: self.gid,
-                            rdev: 0,
-                            flags: 0,
-                        },
-                    );
-                }
-                VirtualEntry::File(file) => {
-                    reply.attr(
-                        &TTL,
-                        &FileAttr {
-                            ino: 1 + file.inode,
-                            size: 13,  // TODO:
-                            blocks: 1, // TODO:
-                            atime: UNIX_EPOCH,
-                            mtime: UNIX_EPOCH,
-                            ctime: UNIX_EPOCH,
-                            crtime: UNIX_EPOCH,
-                            kind: FileType::RegularFile,
-                            perm: 0o644,
-                            nlink: 1,
-                            uid: self.uid,
-                            gid: self.gid,
-                            rdev: 0,
-                            flags: 0,
-                        },
-                    );
-                }
-            }
-        } else {
-            reply.error(ENOENT);
-        }
-    }
-
-    fn read(
-        &mut self,
-        _req: &Request,
-        ino: u64,
-        _fh: u64,
-        offset: i64,
-        _size: u32,
-        reply: ReplyData,
-    ) {
-        println!(
-            "read: ino={}, fh={}, offset={} size={}",
-            ino, _fh, offset, _size
-        );
-
-        if let Some(entry) = self.file_system.get(&(ino - 1)) {
-            info!(
-                "getattr(): found file system entry: {} {}",
-                entry.inode(),
-                entry.name()
-            );
-
-            match entry {
-                VirtualEntry::Folder(_folder) => {
-                    // should not happen
-                    reply.error(ENOENT);
-                }
-                VirtualEntry::File(file) => {
-                    // get file contents :)
-                    let contents = (file.get_contents)();
-                    reply.data(&contents.as_slice()[offset as usize..]);
-                }
-            }
-        } else {
-            reply.error(ENOENT);
-        }
-    }
-
-    fn readdir(
-        &mut self,
-        _req: &Request,
-        ino: u64,
-        _fh: u64,
-        offset: i64,
-        mut reply: ReplyDirectory,
-    ) {
-        self.update_file_system();
-
-        if let Some(entry) = self.file_system.get(&(ino - 1)) {
-            info!(
-                "readdir(): found file system entry: {} {}",
-                entry.inode(),
-                entry.name()
-            );
-
-            match entry {
-                VirtualEntry::Folder(folder) => {
-                    let mut entries = vec![
-                        (1, FileType::Directory, ".".to_string()),
-                        (1, FileType::Directory, "..".to_string()),
-                    ];
-
-                    // find each child entry and add them to the list
-                    for child in folder.children.iter() {
-                        if let Some(child_entry) = self.file_system.get(&child) {
-                            match child_entry {
-                                VirtualEntry::Folder(child_folder) => {
-                                    trace!(
-                                        "readdir(): adding child folder: {} {}",
-                                        child_folder.inode,
-                                        child_folder.name
-                                    );
-                                    entries.push((
-                                        1 + child_folder.inode,
-                                        FileType::Directory,
-                                        child_folder.name.clone(),
-                                    ));
-                                }
-                                VirtualEntry::File(child_file) => {
-                                    trace!(
-                                        "readdir(): adding child file: {} {}",
-                                        child_file.inode,
-                                        child_file.name
-                                    );
-                                    entries.push((
-                                        1 + child_file.inode,
-                                        FileType::RegularFile,
-                                        child_file.name.clone(),
-                                    ));
-                                }
-                            }
-                        }
-                    }
-
-                    // send entries to fuse
-                    for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
-                        // i + 1 means the index of the next entry
-                        reply.add(entry.0, (i + 1) as i64, entry.1, entry.2);
-                    }
-
-                    reply.ok();
-                }
-                VirtualEntry::File(_) => {
-                    // TODO: should not happen in readdir - print warn
-                    reply.error(ENOENT);
-                }
-            }
-        } else {
-            reply.error(ENOENT);
-        }
-    }
-}
 
 pub async fn mount<S: Sink<response::Message> + Unpin>(
     frame: &mut S,
@@ -435,12 +24,13 @@ pub async fn mount<S: Sink<response::Message> + Unpin>(
     // fallback for the mountpath should be PWD + "./alias or id"
 
     // check if connection is valid and increase ref count
-    if let Some(conn) = state.connection_mut(&msg.id) {
+    if let Some(conn) = state.connection_mut(&msg.conn_id) {
         conn.refcount += 1;
 
-        println!("uid={} gid={}", msg.uid, msg.gid);
-
+        // spawn a thread to move this out of the async runtime
         std::thread::spawn(move || {
+            println!("uid={} gid={}", msg.uid, msg.gid);
+
             let opts = [
                 "-o",
                 "ro",
@@ -450,23 +40,80 @@ pub async fn mount<S: Sink<response::Message> + Unpin>(
             let mntopts = opts.iter().map(|o| o.as_ref()).collect::<Vec<&OsStr>>();
 
             // TODO: chmod?
-            let vmfs = VirtualMemoryFileSystem::new(msg.id.clone(), msg.uid, msg.gid);
+            let fuse_id = new_uuid();
+            let vmfs = VirtualMemoryFileSystem::new(&fuse_id, &msg.conn_id, msg.uid, msg.gid);
 
             // TODO: use fuse::spawn_mount to have a convenient umoutn command in memflow?
             // blocks until the fs is umount-ed
-            fuse::mount(vmfs, msg.mount_point, &mntopts).unwrap();
+            let file_system =
+                unsafe { fuse::spawn_mount(vmfs, msg.mount_point.clone(), &mntopts) }.unwrap();
 
-            // dec the refcount again after it was unmounted
+            // grab state and add the new file_system
             let mut state = state_lock_sync();
-            if let Some(conn) = state.connection_mut(&msg.id) {
-                conn.refcount -= 1;
-            }
+            state.file_systems.insert(
+                fuse_id.clone(),
+                FileSystemHandle::new(&fuse_id, &msg.conn_id, &msg.mount_point, file_system),
+            );
         });
-
-        // TODO: add a message explaining that the user has to manually umount the fs
 
         send_ok(frame).await
     } else {
-        send_log_error(frame, &format!("no connection with id {} found", msg.id)).await
+        send_log_error(
+            frame,
+            &format!("no connection with id {} found", msg.conn_id),
+        )
+        .await
+    }
+}
+
+pub async fn ls<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()> {
+    let state = STATE.lock().await;
+
+    send_log_info(
+        frame,
+        &format!(
+            "listing mounted file systems: {} file systems",
+            state.file_systems.len()
+        ),
+    )
+    .await?;
+
+    if !state.file_systems.is_empty() {
+        let mut table = response::Table::default();
+        table.headers = vec![
+            "id".to_string(),
+            "connection".to_string(),
+            "mount point".to_string(),
+        ];
+
+        for c in state.file_systems.iter() {
+            let entry = vec![c.1.id.clone(), c.1.conn_id.clone(), c.1.mount_point.clone()];
+            table.entries.push(entry);
+        }
+
+        send_table(frame, table).await?;
+    }
+
+    send_ok(frame).await
+}
+
+pub async fn umount<S: Sink<response::Message> + Unpin>(
+    frame: &mut S,
+    msg: request::FuseUmount,
+) -> Result<()> {
+    let mut state = STATE.lock().await;
+
+    if state.file_systems.contains_key(&msg.fuse_id) {
+        state.file_systems.remove(&msg.fuse_id);
+        send_ok(frame).await
+    } else {
+        send_err(
+            frame,
+            &format!(
+                "unable to remove file system {}: file system not found",
+                msg.fuse_id
+            ),
+        )
+        .await
     }
 }

@@ -8,6 +8,8 @@ pub enum Message {
 
     // TODO: make os specific
     FuseMount(FuseMount),
+    FuseListMounts,
+    FuseUmount(FuseUmount),
 
     ListProcesses(ListProcesses),
     OpenProcess(OpenProcess),
@@ -23,24 +25,30 @@ pub struct Connect {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CloseConnection {
-    pub id: String,
+    pub conn_id: String,
 }
 
 // TODO: make os specific
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FuseMount {
-    pub id: String,
+    pub conn_id: String,
     pub mount_point: String,
     pub uid: u32,
     pub gid: u32,
 }
 
+// TODO: make os specific
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FuseUmount {
+    pub fuse_id: String,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ListProcesses {
-    pub id: String,
+    pub conn_id: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct OpenProcess {
-    pub id: String,
+    pub proc_id: String,
 }

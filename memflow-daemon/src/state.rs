@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use tokio::sync::{Mutex, MutexGuard};
 
+use fuse::BackgroundSession;
 use lazy_static::lazy_static;
 use uuid::Uuid;
 
@@ -29,6 +30,8 @@ pub struct State {
     pub connections: HashMap<String, OpenedConnection>,
     pub connection_aliases: HashMap<String, String>,
 
+    pub file_systems: HashMap<String, FileSystemHandle<'static>>,
+
     pub processes: HashMap<String, OpenedProcess>,
 }
 
@@ -37,6 +40,8 @@ impl State {
         Self {
             connections: HashMap::new(),
             connection_aliases: HashMap::new(),
+
+            file_systems: HashMap::new(),
 
             processes: HashMap::new(),
         }
@@ -145,6 +150,24 @@ impl OpenedConnection {
             name: name.to_string(),
             args,
             kernel,
+        }
+    }
+}
+
+pub struct FileSystemHandle<'a> {
+    pub id: String,
+    pub conn_id: String,
+    pub mount_point: String,
+    pub session: BackgroundSession<'a>,
+}
+
+impl<'a> FileSystemHandle<'a> {
+    pub fn new(id: &str, conn_id: &str, mount_point: &str, session: BackgroundSession<'a>) -> Self {
+        Self {
+            id: id.to_string(),
+            conn_id: conn_id.to_string(),
+            mount_point: mount_point.to_string(),
+            session,
         }
     }
 }

@@ -9,13 +9,13 @@ use memflow_daemon::request;
 
 pub const COMMAND_STR: &str = "ls";
 
-const CONNECTOR_ID: &str = "CONNECTOR_ID";
+const CONNECTION_ID: &str = "CONNECTION_ID";
 
 pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
     SubCommand::with_name(COMMAND_STR)
         .about("lists all open connections")
         .arg(
-            Arg::with_name(CONNECTOR_ID)
+            Arg::with_name(CONNECTION_ID)
                 .help("the connector to be used for the new connection")
                 .index(1)
                 .required(true),
@@ -25,10 +25,10 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
 pub fn handle_command(matches: &ArgMatches) {
     trace!("handling command");
 
-    let id = matches.value_of(CONNECTOR_ID).unwrap();
+    let conn_id = matches.value_of(CONNECTION_ID).unwrap();
 
     dispatch_request(request::Message::ListProcesses(request::ListProcesses {
-        id: id.to_string(),
+        conn_id: conn_id.to_string(),
     }))
     .unwrap();
 }

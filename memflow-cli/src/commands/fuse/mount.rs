@@ -1,5 +1,4 @@
 use crate::dispatch::*;
-use crate::error::Result;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 
@@ -9,7 +8,7 @@ use memflow_daemon::request;
 
 pub const COMMAND_STR: &str = "mount";
 
-const CONNECTION_ID: &str = "CONNECTOR_ID";
+const CONNECTION_ID: &str = "CONNECTION_ID";
 const MOUNT_POINT: &str = "MOUNT_POINT";
 
 pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
@@ -32,11 +31,11 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
 pub fn handle_command(matches: &ArgMatches) {
     trace!("handling command");
 
-    let id = matches.value_of(CONNECTION_ID).unwrap();
+    let conn_id = matches.value_of(CONNECTION_ID).unwrap();
     let mount_point = matches.value_of(MOUNT_POINT).unwrap();
 
     dispatch_request(request::Message::FuseMount(request::FuseMount {
-        id: id.to_string(),
+        conn_id: conn_id.to_string(),
         mount_point: mount_point.to_string(),
         uid: unsafe { libc::getuid() },
         gid: unsafe { libc::getgid() },

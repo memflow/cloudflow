@@ -70,6 +70,14 @@ async fn main() -> Result<()> {
                     request::Message::FuseMount(msg) => commands::fuse::mount(&mut serializer, msg)
                         .await
                         .expect("failed to execute fuse mount command"),
+                    request::Message::FuseListMounts => commands::fuse::ls(&mut serializer)
+                        .await
+                        .expect("failed to execute fuse ls command"),
+                    request::Message::FuseUmount(msg) => {
+                        commands::fuse::umount(&mut serializer, msg)
+                            .await
+                            .expect("failed to execute fuse umount command")
+                    }
 
                     request::Message::ListProcesses(msg) => {
                         commands::process::ls(&mut serializer, msg)

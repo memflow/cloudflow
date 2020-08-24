@@ -130,15 +130,15 @@ pub async fn rm<S: Sink<response::Message> + Unpin>(
 ) -> Result<()> {
     let mut state = STATE.lock().await;
 
-    match state.connection_remove(&msg.id) {
+    match state.connection_remove(&msg.conn_id) {
         Ok(_) => {
-            send_log_info(frame, &format!("connection {} removed", msg.id)).await?;
+            send_log_info(frame, &format!("connection {} removed", msg.conn_id)).await?;
             send_ok(frame).await
         }
         Err(err) => {
             send_err(
                 frame,
-                &format!("unable to remove connection {}: {}", msg.id, err),
+                &format!("unable to remove connection {}: {}", msg.conn_id, err),
             )
             .await
         }
