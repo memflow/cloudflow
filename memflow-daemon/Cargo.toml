@@ -1,0 +1,31 @@
+[package]
+name = "memflow-daemon"
+version = "0.1.0"
+authors = ["ko1N <ko1N1337@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+memflow-core = { path = "../../memflow/memflow-core" }
+memflow-win32 = { path = "../../memflow/memflow-win32" }
+log = "0.4.8"
+simple_logger = "1.0.1"
+lazy_static = "1.4"
+uuid = { version = "0.8", features = ["v4"] }
+
+# tokio
+tokio = { version = "0.2.0", features = ["full"] }
+tokio-util = { version = "0.3.0", features = ["full"] }
+tokio-serde = { version = "0.6", features = ["json"] }
+futures = "0.3.0"
+http = "0.2"
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0"
+httparse = "1.0"
+time = "0.1"
+
+# TODO: only on linux
+# fuse
+fuse = { git = "https://github.com/zargony/fuse-rs" }
+libc = "0.2.51"
+bitfield = "0.13.2"

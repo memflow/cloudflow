@@ -9,11 +9,11 @@ RNAME=$(echo -n ${@##*/})
 if [[ "$PCMD" =~ "cargo test" ]]; then
 	exec $@
 elif [[ "$PCMD" =~ "cargo bench" ]]; then
-	if [[ $RNAME =~ "dummy" ]]; then
-		exec $@
-	else
-		exec sudo $@
-	fi
+	exec $@
 else
-	exec sudo $@
+	if [[ $RNAME =~ "memflow-daemon" ]]; then
+		exec sudo $@
+	else
+		exec $@
+	fi
 fi
