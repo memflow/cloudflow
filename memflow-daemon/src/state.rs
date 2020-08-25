@@ -1,3 +1,5 @@
+use crate::error::{Error, Result};
+
 use std::collections::HashMap;
 use tokio::sync::{Mutex, MutexGuard};
 
@@ -6,6 +8,7 @@ use lazy_static::lazy_static;
 use uuid::Uuid;
 
 use memflow_core::*;
+use memflow_win32::*;
 
 lazy_static! {
     pub static ref STATE: Mutex<State> = Mutex::new(State::new());
@@ -117,9 +120,15 @@ impl State {
     }
 }
 
-pub type CachedWin32Kernel = memflow_win32::Kernel<
-    CachedMemoryAccess<'static, ConnectorInstance, TimedCacheValidator>,
-    CachedVirtualTranslate<DirectTranslate, TimedCacheValidator>,
+pub type CachedConnectorInstance =
+    CachedMemoryAccess<'static, ConnectorInstance, TimedCacheValidator>;
+
+pub type CachedTranslate = CachedVirtualTranslate<DirectTranslate, TimedCacheValidator>;
+
+pub type CachedWin32Kernel = memflow_win32::Kernel<CachedConnectorInstance, CachedTranslate>;
+
+pub type CachedWin32Process<'a> = memflow_win32::Win32Process<
+    VirtualDMA<&'a mut CachedConnectorInstance, &'a mut CachedTranslate, Win32VirtualTranslate>,
 >;
 
 pub enum KernelHandle {

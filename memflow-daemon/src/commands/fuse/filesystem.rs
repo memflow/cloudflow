@@ -2,7 +2,7 @@ mod module_memory;
 mod process_info;
 
 use crate::error::Result;
-use crate::state::{state_lock_sync, KernelHandle};
+use crate::state::{state_lock_sync, CachedWin32Process, KernelHandle};
 
 use bitfield::bitfield;
 use std::collections::HashMap;
@@ -10,7 +10,6 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use log::{info, trace};
 
-use memflow_core::{Address, VirtualMemory, PID};
 use memflow_win32::*;
 
 use fuse::{
@@ -76,7 +75,6 @@ impl VirtualFolder {
 pub struct VirtualFile {
     pub inode: u64,
     pub name: String,
-    // TODO: decide wether to go generic or trait object way?
     pub data_source: Box<dyn VirtualFileDataSource>,
 }
 
@@ -86,39 +84,25 @@ pub trait VirtualFileDataSource {
     fn contents(&mut self, offset: i64, size: u32) -> Result<Vec<u8>>;
 }
 
-/// The scope a vmfs module uses.
-pub enum VMFSModuleScope {
-    Connection,
-    Process,
-    Module,
-}
-
-/// The scope context uniquely describes a scope.
-/// It contains information such as connection id, process id, etc.
-#[derive(Debug, Clone)]
-pub enum VMFSScopeContext {
-    Connection {
-        conn_id: String,
-    },
-    Process {
-        conn_id: String,
-        pid: PID,
-    },
-    Module {
-        conn_id: String,
-        pid: PID,
-        peb_entry: Address,
-    },
-}
-
-// TODO: maybe it would be useful to split up the VMFSModule for each scope and remove the scope argument
-// TODO: This would make it easier to customize the entry() function
-
 /// Trait describing a module of the vmfs.
 /// This is used to extend functionality of the vmfs and add files/folders in a modular way.
-pub trait VMFSModule {
-    fn scope(&self) -> VMFSModuleScope;
-    fn entry(&self, inode: u64, ctx: VMFSScopeContext) -> VirtualEntry;
+
+pub trait VMFSConnectionExt {
+    fn entry(&self, inode: u64, conn_id: &str) -> VirtualEntry;
+}
+
+pub trait VMFSProcessExt {
+    fn entry(&self, inode: u64, conn_id: &str, process: &mut CachedWin32Process) -> VirtualEntry;
+}
+
+pub trait VMFSModuleExt {
+    fn entry(
+        &self,
+        inode: u64,
+        conn_id: &str,
+        process: &mut CachedWin32Process,
+        mod_info: &Win32ModuleInfo,
+    ) -> VirtualEntry;
 }
 
 /// The Virtual Memory File System
@@ -133,9 +117,9 @@ pub struct VirtualMemoryFileSystem {
     last_refresh: Instant,
     file_system: HashMap<u64, VirtualEntry>,
 
-    modules_connections: Vec<Box<dyn VMFSModule>>,
-    modules_processes: Vec<Box<dyn VMFSModule>>,
-    modules_modules: Vec<Box<dyn VMFSModule>>,
+    modules_connections: Vec<Box<dyn VMFSConnectionExt>>,
+    modules_processes: Vec<Box<dyn VMFSProcessExt>>,
+    modules_modules: Vec<Box<dyn VMFSModuleExt>>,
 }
 
 unsafe impl Send for VirtualMemoryFileSystem {}
@@ -177,16 +161,12 @@ impl VirtualMemoryFileSystem {
         let mut inode = INode(0);
         let mut root_folder = VirtualFolder::new(inode.0, &self.conn_id);
 
-        let ctx = VMFSScopeContext::Connection {
-            conn_id: self.conn_id.clone(),
-        };
-
         // add all vmfs modules for the connection scope
         // inode for connection entries is: 0-0-x
         inode.set_mid(0);
         for module in self.modules_connections.iter() {
             inode.set_id(inode.id() + 1);
-            let fse = module.entry(inode.0, ctx.clone()); // TODO: handle recursive entries for folders+subfolders
+            let fse = module.entry(inode.0, &self.conn_id); // TODO: handle recursive entries for folders+subfolders
 
             // insert entry into filesystem and process
             file_system.insert(inode.0, fse);
@@ -218,15 +198,12 @@ impl VirtualMemoryFileSystem {
         file_system
     }
 
-    fn create_process_folder<T>(
+    fn create_process_folder(
         &self,
         mut inode: INode,
-        mut process: Win32Process<T>,
+        mut process: CachedWin32Process,
         file_system: &mut HashMap<u64, VirtualEntry>,
-    ) -> u64
-    where
-        T: VirtualMemory,
-    {
+    ) -> u64 {
         let mut proc_folder = VirtualFolder::new(
             inode.0,
             &format!(
@@ -236,18 +213,13 @@ impl VirtualMemoryFileSystem {
             ),
         );
 
-        let ctx = VMFSScopeContext::Process {
-            conn_id: self.conn_id.clone(),
-            pid: process.proc_info.pid,
-        };
-
         // add all vmfs modules for the process scope
         // inode for process module entries is: pid-0-x
         inode.set_mid(0);
         for module in self.modules_processes.iter() {
             // instantiate entry with a new id
             inode.set_id(inode.id() + 1);
-            let fse = module.entry(inode.0, ctx.clone()); // TODO: handle recursive entries for folders+subfolders
+            let fse = module.entry(inode.0, &self.conn_id, &mut process); // TODO: handle recursive entries for folders+subfolders
 
             // insert entry into filesystem and process
             file_system.insert(inode.0, fse);
@@ -261,7 +233,7 @@ impl VirtualMemoryFileSystem {
                 inode.set_mid(inode.mid() + 1); // increase mid for each module
                 proc_folder.children.push(self.create_module_folder(
                     INode(inode.0),
-                    &process.proc_info,
+                    &mut process,
                     mi,
                     file_system,
                 ));
@@ -276,7 +248,7 @@ impl VirtualMemoryFileSystem {
     fn create_module_folder(
         &self,
         mut inode: INode,
-        proc_info: &Win32ProcessInfo,
+        process: &mut CachedWin32Process,
         mod_info: &Win32ModuleInfo,
         file_system: &mut HashMap<u64, VirtualEntry>,
     ) -> u64 {
@@ -287,17 +259,11 @@ impl VirtualMemoryFileSystem {
             &format!("{}_{}", mod_info.base, mod_info.name.replace(".", "_")),
         );
 
-        let ctx = VMFSScopeContext::Module {
-            conn_id: self.conn_id.clone(),
-            pid: proc_info.pid,
-            peb_entry: mod_info.peb_entry,
-        };
-
         // add all vmfs modules for the module scope
         for module in self.modules_modules.iter() {
             // instantiate entry with a new id
             inode.set_id(inode.id() + 1);
-            let fse = module.entry(inode.0, ctx.clone()); // TODO: handle recursive entries for folders+subfolders
+            let fse = module.entry(inode.0, &self.conn_id, process, &mod_info); // TODO: handle recursive entries for folders+subfolders
 
             // insert entry into filesystem and process
             file_system.insert(inode.0, fse);
