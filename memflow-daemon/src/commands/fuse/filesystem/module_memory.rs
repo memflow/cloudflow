@@ -22,6 +22,7 @@ impl VMFSModuleExt for VMFSModuleMemory {
                 &conn_id,
                 process.proc_info.pid,
                 mod_info.peb_entry,
+                mod_info.size(),
             )),
         })
     }
@@ -31,34 +32,23 @@ struct VMFSModuleMemoryDS {
     conn_id: String,
     pid: PID,
     peb_entry: Address,
+    content_length: usize,
 }
 
 impl VMFSModuleMemoryDS {
-    pub fn new(conn_id: &str, pid: PID, peb_entry: Address) -> Self {
+    pub fn new(conn_id: &str, pid: PID, peb_entry: Address, content_length: usize) -> Self {
         Self {
             conn_id: conn_id.to_string(),
             pid,
             peb_entry,
+            content_length,
         }
     }
 }
 
 impl VirtualFileDataSource for VMFSModuleMemoryDS {
     fn content_length(&self) -> Result<u64> {
-        let mut state = state_lock_sync();
-        let conn = state
-            .connection_mut(&self.conn_id)
-            .ok_or_else(|| Error::Other("connection not found"))?;
-
-        match &mut conn.kernel {
-            KernelHandle::Win32(kernel) => {
-                let mut process = kernel.process_pid(self.pid).map_err(Error::from)?;
-                let module_info = process
-                    .module_info_from_peb(self.peb_entry)
-                    .map_err(Error::from)?;
-                Ok(module_info.size() as u64)
-            }
-        }
+        Ok(self.content_length as u64)
     }
 
     fn contents(&mut self, offset: i64, size: u32) -> Result<Vec<u8>> {
