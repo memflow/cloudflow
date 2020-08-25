@@ -1,7 +1,7 @@
 mod module_memory;
 mod process_info;
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::state::{state_lock_sync, KernelHandle};
 
 use bitfield::bitfield;
@@ -10,7 +10,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use log::{info, trace};
 
-use memflow_core::{Address, VirtualMemory};
+use memflow_core::{Address, VirtualMemory, PID};
 use memflow_win32::*;
 
 use fuse::{
@@ -102,11 +102,11 @@ pub enum VMFSScopeContext {
     },
     Process {
         conn_id: String,
-        pid: i32,
+        pid: PID,
     },
     Module {
         conn_id: String,
-        pid: i32,
+        pid: PID,
         peb_entry: Address,
     },
 }
