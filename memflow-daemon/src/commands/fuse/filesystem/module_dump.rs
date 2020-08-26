@@ -17,7 +17,7 @@ impl VMFSModuleExt for VMFSModuleMemory {
     ) -> Result<VirtualEntry> {
         Ok(VirtualEntry::File(VirtualFile {
             inode,
-            name: "memory".to_string(),
+            name: "dump".to_string(),
             data_source: Box::new(VMFSModuleMemoryDS::new(
                 &conn_id,
                 process.proc_info.pid,

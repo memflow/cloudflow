@@ -1,4 +1,5 @@
-mod module_memory;
+mod connection_memory;
+mod module_dump;
 mod process_info;
 mod process_memory;
 
@@ -142,12 +143,12 @@ impl VirtualMemoryFileSystem {
             last_refresh: Instant::now(),
             file_system: HashMap::new(),
 
-            modules_connections: Vec::new(),
+            modules_connections: vec![Box::new(connection_memory::VMFSConnectionMemory)],
             modules_processes: vec![
                 Box::new(process_info::VMFSProcessInfo),
                 Box::new(process_memory::VMFSProcessMemory),
             ],
-            modules_modules: vec![Box::new(module_memory::VMFSModuleMemory)],
+            modules_modules: vec![Box::new(module_dump::VMFSModuleMemory)],
         };
 
         // initialize file_system

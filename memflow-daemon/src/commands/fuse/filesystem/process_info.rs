@@ -12,7 +12,7 @@ impl VMFSProcessExt for VMFSProcessInfo {
     ) -> Result<VirtualEntry> {
         Ok(VirtualEntry::File(VirtualFile {
             inode,
-            name: "process_info".to_string(),
+            name: "info".to_string(),
             data_source: Box::new(VMFSProcessInfoDS::new(format!("{:?}", process.proc_info))),
         }))
     }
