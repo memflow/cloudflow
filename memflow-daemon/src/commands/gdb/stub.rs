@@ -5,6 +5,9 @@ use std::net::{TcpListener, TcpStream};
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 
+use log::info;
+use url::{Host, Origin, Url};
+
 use gdbstub::{
     arch, BreakOp, Connection, DisconnectReason, GdbStub, OptResult, ResumeAction, StopReason,
     Target, Tid, TidSelector, WatchKind, SINGLE_THREAD_TID,
@@ -14,14 +17,12 @@ use memflow_core::*;
 use memflow_win32::*;
 
 // TODO: better error handling
-fn wait_for_tcp(port: u16) -> Result<TcpStream> {
-    //let sockaddr = format!("0.0.0.0:{}", port);
-    let sockaddr = format!("127.0.0.1:{}", port);
-    eprintln!("Waiting for a GDB connection on {:?}...", sockaddr);
+fn wait_for_tcp(sockaddr: &str) -> Result<TcpStream> {
+    info!("started tcp gdb stub on {:?}", sockaddr);
 
     let sock = TcpListener::bind(sockaddr).map_err(|_| Error::IO)?;
     let (stream, addr) = sock.accept().map_err(|_| Error::IO)?;
-    eprintln!("Debugger connected from {}", addr);
+    info!("debugger connected from {}", addr);
 
     Ok(stream)
 }
@@ -37,38 +38,34 @@ fn wait_for_uds(path: &str) -> Result<UnixStream> {
         },
     }
 
-    eprintln!("Waiting for a GDB connection on {}...", path);
+    info!("started unix socket gdb stub at {}", path);
 
     let sock = UnixListener::bind(path).map_err(|_| Error::IO)?;
     let (stream, addr) = sock.accept().map_err(|_| Error::IO)?;
-    eprintln!("Debugger connected from {:?}", addr);
+    info!("debugger connected from {:?}", addr);
 
     Ok(stream)
 }
 
 /// Creates a new gdb stub and blocks
-pub fn spawn_stub(id: &str, conn_id: &str, pid: PID, addr: &str) -> Result<()> {
-    // TODO: parse addr
-    let args = ConnectorArgs::try_parse_str(addr)?;
+pub fn new_gdb_stub(id: &str, conn_id: &str, pid: PID, addr: &str) -> Result<()> {
+    // try to parse as url
+    let url = Url::parse(addr).map_err(|_| Error::Other("invalid url"))?;
 
-    let connection: Box<dyn Connection<Error = std::io::Error>> = {
-        //Box::new(wait_for_uds("/tmp/memflow_gdb")?)
-        Box::new(wait_for_tcp(8000)?)
-
-        /*
-        if std::env::args().nth(1) == Some("--uds".to_string()) {
-            #[cfg(not(unix))]
-            {
-                return Err("Unix Domain Sockets can only be used on Unix".into());
+    let connection: Box<dyn Connection<Error = std::io::Error>> = match url.scheme() {
+        "tcp" => {
+            if let Some(host_str) = url.host_str() {
+                Box::new(wait_for_tcp(&format!(
+                    "{}:{}",
+                    host_str,
+                    url.port().unwrap_or(8000)
+                ))?)
+            } else {
+                return Err(Error::Other("invalid tcp host"));
             }
-            #[cfg(unix)]
-            {
-                Box::new(wait_for_uds("/tmp/memflow_gdb")?)
-            }
-        } else {
-            Box::new(wait_for_tcp(9001)?)
         }
-        */
+        "unix" => Box::new(wait_for_uds(url.path())?),
+        _ => return Err(Error::Other("only tcp and unix urls are supported")),
     };
 
     // hook-up debugger
@@ -76,7 +73,7 @@ pub fn spawn_stub(id: &str, conn_id: &str, pid: PID, addr: &str) -> Result<()> {
 
     let mut stub = VMGDBStub::new(id, conn_id, pid);
 
-    match debugger.run(&mut stub).map_err(|_| Error::GDB)? {
+    match debugger.run(&mut stub).unwrap() {
         DisconnectReason::Disconnect => {
             // run to completion
             //while emu.step() != Some(emu::Event::Halted) {}
@@ -93,7 +90,7 @@ pub fn spawn_stub(id: &str, conn_id: &str, pid: PID, addr: &str) -> Result<()> {
     Ok(())
 }
 
-///
+/// Implementation of the Virtual Memory GDB Stub
 pub struct VMGDBStub {
     id: String,
     conn_id: String,
@@ -124,7 +121,7 @@ impl Target for VMGDBStub {
     }
 
     fn read_registers(&mut self, _regs: &mut arch::x86::reg::X86_64CoreRegs) -> Result<()> {
-        // TODO: set eip/rip to entry point of binary
+        // TODO: set eip/rip to entry point of binary (and fallback to section base)
         Ok(())
     }
 
@@ -137,13 +134,6 @@ impl Target for VMGDBStub {
         addr: std::ops::Range<u64>,
         push_byte: &mut dyn FnMut(u8),
     ) -> Result<()> {
-        println!("read_addrs: {:?}", addr);
-        /*
-        for addr in addr {
-            push_byte(self.mem.r8(addr))
-        }
-        */
-
         let mut state = state_lock_sync();
         let conn = state
             .connection_mut(&self.conn_id)
@@ -168,6 +158,7 @@ impl Target for VMGDBStub {
     }
 
     fn write_addrs(&mut self, start_addr: u64, data: &[u8]) -> Result<()> {
+        // TODO:
         println!(
             "write_addrs: {}..{}",
             start_addr,

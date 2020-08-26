@@ -1,4 +1,7 @@
-use super::{CachedWin32Process, VMFSModuleExt, VirtualEntry, VirtualFile, VirtualFileDataSource};
+use super::{
+    CachedWin32Process, VMFSModuleExt, VirtualEntry, VirtualFile, VirtualFileDataSource,
+    VirtualFolder,
+};
 use crate::error::{Error, Result};
 use crate::state::{state_lock_sync, KernelHandle};
 
@@ -13,20 +16,27 @@ pub struct VMFSModulePEHeader;
 impl VMFSModuleExt for VMFSModulePEHeader {
     fn entry(
         &self,
-        inode: u64,
         conn_id: &str,
         process: &mut CachedWin32Process,
         mod_info: &Win32ModuleInfo,
+        add_child: &mut dyn FnMut(VirtualEntry) -> u64,
     ) -> Result<VirtualEntry> {
-        Ok(VirtualEntry::File(VirtualFile {
-            inode,
-            name: "pe_header".to_string(),
-            data_source: Box::new(VMFSModulePEHeaderDS::new(
-                &conn_id,
-                process.proc_info.pid,
-                mod_info,
-            )),
-        }))
+        // create pe folder
+        let mut folder = VirtualFolder::new("pe");
+
+        // insert into tree?
+        folder
+            .children
+            .push(add_child(VirtualEntry::File(VirtualFile {
+                name: "header".to_string(),
+                data_source: Box::new(VMFSModulePEHeaderDS::new(
+                    &conn_id,
+                    process.proc_info.pid,
+                    mod_info,
+                )),
+            })));
+
+        Ok(VirtualEntry::Folder(folder))
     }
 }
 

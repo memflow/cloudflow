@@ -1,4 +1,6 @@
-use super::{CachedWin32Process, VMFSProcessExt, VirtualEntry, VirtualFile, VirtualFileDataSource};
+use super::{
+    CachedWin32Process, INode, VMFSProcessExt, VirtualEntry, VirtualFile, VirtualFileDataSource,
+};
 use crate::error::{Error, Result};
 use crate::state::{state_lock_sync, KernelHandle};
 
@@ -10,12 +12,11 @@ pub struct VMFSProcessMemory;
 impl VMFSProcessExt for VMFSProcessMemory {
     fn entry(
         &self,
-        inode: u64,
         conn_id: &str,
         process: &mut CachedWin32Process,
+        _add_child: &mut dyn FnMut(VirtualEntry) -> u64,
     ) -> Result<VirtualEntry> {
         Ok(VirtualEntry::File(VirtualFile {
-            inode,
             name: "mem".to_string(),
             data_source: Box::new(VMFSProcessMemoryDS::new(&conn_id, process.proc_info.pid)),
         }))

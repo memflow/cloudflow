@@ -28,12 +28,14 @@ pub async fn attach<S: Sink<response::Message> + Unpin>(
     if let Some(conn) = state.connection_mut(&msg.conn_id) {
         conn.refcount += 1;
 
+        // TODO: set some error?
+
         std::thread::spawn(move || {
             println!("spawning gdb stub");
 
             let gdb_id = new_uuid();
 
-            stub::spawn_stub(
+            stub::new_gdb_stub(
                 &gdb_id,
                 &msg.conn_id,
                 msg.pid.parse::<PID>().unwrap(),

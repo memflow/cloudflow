@@ -43,13 +43,6 @@ pub enum VirtualEntry {
 }
 
 impl VirtualEntry {
-    pub fn inode(&self) -> u64 {
-        match self {
-            VirtualEntry::Folder(folder) => folder.inode,
-            VirtualEntry::File(file) => file.inode,
-        }
-    }
-
     pub fn name(&self) -> &str {
         match self {
             VirtualEntry::Folder(folder) => &folder.name,
@@ -60,15 +53,13 @@ impl VirtualEntry {
 
 /// A folder in the vmfs.
 pub struct VirtualFolder {
-    pub inode: u64,
     pub name: String,
     pub children: Vec<u64>,
 }
 
 impl VirtualFolder {
-    pub fn new(inode: u64, name: &str) -> Self {
+    pub fn new(name: &str) -> Self {
         Self {
-            inode,
             name: name.to_string(),
             children: Vec::new(),
         }
@@ -77,7 +68,6 @@ impl VirtualFolder {
 
 /// A file in the vmfs.
 pub struct VirtualFile {
-    pub inode: u64,
     pub name: String,
     pub data_source: Box<dyn VirtualFileDataSource>,
 }
@@ -92,25 +82,29 @@ pub trait VirtualFileDataSource {
 /// This is used to extend functionality of the vmfs and add files/folders in a modular way.
 
 pub trait VMFSConnectionExt {
-    fn entry(&self, inode: u64, conn_id: &str) -> Result<VirtualEntry>;
+    fn entry(
+        &self,
+        conn_id: &str,
+        add_child: &mut dyn FnMut(VirtualEntry) -> u64,
+    ) -> Result<VirtualEntry>;
 }
 
 pub trait VMFSProcessExt {
     fn entry(
         &self,
-        inode: u64,
         conn_id: &str,
         process: &mut CachedWin32Process,
+        add_child: &mut dyn FnMut(VirtualEntry) -> u64,
     ) -> Result<VirtualEntry>;
 }
 
 pub trait VMFSModuleExt {
     fn entry(
         &self,
-        inode: u64,
         conn_id: &str,
         process: &mut CachedWin32Process,
         mod_info: &Win32ModuleInfo,
+        add_child: &mut dyn FnMut(VirtualEntry) -> u64,
     ) -> Result<VirtualEntry>;
 }
 
@@ -174,16 +168,19 @@ impl VirtualMemoryFileSystem {
         let mut file_system = HashMap::new();
 
         let mut inode = INode(0);
-        let mut root_folder = VirtualFolder::new(inode.0, &self.conn_id);
+        let root_inode = INode(inode.0);
+        let mut root_folder = VirtualFolder::new(&self.conn_id);
 
         // add all vmfs modules for the connection scope
         // inode for connection entries is: 0-0-x
         inode.set_mid(0);
         for module in self.modules_connections.iter() {
-            inode.set_id(inode.id() + 1);
-            if let Ok(fse) = module.entry(inode.0, &self.conn_id) {
-                // TODO: handle recursive entries for folders+subfolders
-                // insert entry into filesystem and process
+            if let Ok(fse) = module.entry(&self.conn_id, &mut |fse| {
+                inode.set_id(inode.id() + 1);
+                file_system.insert(inode.0, fse);
+                inode.0
+            }) {
+                inode.set_id(inode.id() + 1);
                 file_system.insert(inode.0, fse);
                 root_folder.children.push(inode.0);
             }
@@ -209,7 +206,7 @@ impl VirtualMemoryFileSystem {
             }
         }
 
-        file_system.insert(root_folder.inode, VirtualEntry::Folder(root_folder));
+        file_system.insert(root_inode.0, VirtualEntry::Folder(root_folder));
 
         file_system
     }
@@ -220,24 +217,24 @@ impl VirtualMemoryFileSystem {
         mut process: CachedWin32Process,
         file_system: &mut HashMap<u64, VirtualEntry>,
     ) -> u64 {
-        let mut proc_folder = VirtualFolder::new(
-            inode.0,
-            &format!(
-                "{}_{}",
-                process.proc_info.pid,
-                process.proc_info.name.replace(".", "_")
-            ),
-        );
+        let proc_inode = INode(inode.0);
+        let mut proc_folder = VirtualFolder::new(&format!(
+            "{}_{}",
+            process.proc_info.pid,
+            process.proc_info.name.replace(".", "_")
+        ));
 
         // add all vmfs modules for the process scope
         // inode for process module entries is: pid-0-x
         inode.set_mid(0);
         for module in self.modules_processes.iter() {
             // instantiate entry with a new id
-            inode.set_id(inode.id() + 1);
-            if let Ok(fse) = module.entry(inode.0, &self.conn_id, &mut process) {
-                // TODO: handle recursive entries for folders+subfolders
-                // insert entry into filesystem and process
+            if let Ok(fse) = module.entry(&self.conn_id, &mut process, &mut |fse| {
+                inode.set_id(inode.id() + 1);
+                file_system.insert(inode.0, fse);
+                inode.0
+            }) {
+                inode.set_id(inode.id() + 1);
                 file_system.insert(inode.0, fse);
                 proc_folder.children.push(inode.0);
             }
@@ -257,9 +254,8 @@ impl VirtualMemoryFileSystem {
             }
         }
 
-        let prc_inode = proc_folder.inode;
-        file_system.insert(prc_inode, VirtualEntry::Folder(proc_folder));
-        prc_inode
+        file_system.insert(proc_inode.0, VirtualEntry::Folder(proc_folder));
+        proc_inode.0
     }
 
     fn create_module_folder(
@@ -271,26 +267,29 @@ impl VirtualMemoryFileSystem {
     ) -> u64 {
         inode.set_id(0);
 
-        let mut module_folder = VirtualFolder::new(
-            inode.0,
-            &format!("{}_{}", mod_info.base, mod_info.name.replace(".", "_")),
-        );
+        let module_inode = INode(inode.0);
+        let mut module_folder = VirtualFolder::new(&format!(
+            "{}_{}",
+            mod_info.base,
+            mod_info.name.replace(".", "_")
+        ));
 
         // add all vmfs modules for the module scope
         for module in self.modules_modules.iter() {
             // instantiate entry with a new id
-            inode.set_id(inode.id() + 1);
-            if let Ok(fse) = module.entry(inode.0, &self.conn_id, process, &mod_info) {
-                // TODO: handle recursive entries for folders+subfolders
-                // insert entry into filesystem and process
+            if let Ok(fse) = module.entry(&self.conn_id, process, &mod_info, &mut |fse| {
+                inode.set_id(inode.id() + 1);
+                file_system.insert(inode.0, fse);
+                inode.0
+            }) {
+                inode.set_id(inode.id() + 1);
                 file_system.insert(inode.0, fse);
                 module_folder.children.push(inode.0);
             }
         }
 
-        let module_inode = module_folder.inode;
-        file_system.insert(module_inode, VirtualEntry::Folder(module_folder));
-        module_inode
+        file_system.insert(module_inode.0, VirtualEntry::Folder(module_folder));
+        module_inode.0
     }
 }
 
@@ -301,7 +300,7 @@ impl Filesystem for VirtualMemoryFileSystem {
         if let Some(entry) = self.file_system.get(&(parent - 1)) {
             info!(
                 "lookup(): found file system entry: {} {}",
-                entry.inode(),
+                parent - 1,
                 entry.name()
             );
 
@@ -309,13 +308,13 @@ impl Filesystem for VirtualMemoryFileSystem {
                 VirtualEntry::Folder(folder) => {
                     // match child entries by name
                     // TODO: maybe add a map?
-                    for child in folder.children.clone().iter() {
-                        if let Some(child_entry) = self.file_system.get_mut(&child) {
+                    for child_inode in folder.children.clone().iter() {
+                        if let Some(child_entry) = self.file_system.get_mut(&child_inode) {
                             // TODO: improve this check
                             if child_entry.name() == name.to_string_lossy() {
                                 trace!(
                                     "lookup(): found child entry: {} {}",
-                                    child_entry.inode(),
+                                    child_inode,
                                     child_entry.name()
                                 );
                                 match child_entry {
@@ -323,7 +322,7 @@ impl Filesystem for VirtualMemoryFileSystem {
                                         reply.entry(
                                             &TTL,
                                             &FileAttr {
-                                                ino: 1 + child_folder.inode,
+                                                ino: 1 + child_inode,
                                                 size: 0,
                                                 blocks: 0,
                                                 atime: UNIX_EPOCH,
@@ -345,7 +344,7 @@ impl Filesystem for VirtualMemoryFileSystem {
                                         reply.entry(
                                             &TTL,
                                             &FileAttr {
-                                                ino: 1 + child_file.inode,
+                                                ino: 1 + child_inode,
                                                 size: child_file
                                                     .data_source
                                                     .content_length()
@@ -387,19 +386,19 @@ impl Filesystem for VirtualMemoryFileSystem {
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
         self.update_file_system();
 
-        if let Some(entry) = self.file_system.get(&(ino - 1)) {
+        if let Some(entry) = self.file_system.get_mut(&(ino - 1)) {
             info!(
                 "getattr(): found file system entry: {} {}",
-                entry.inode(),
+                ino - 1,
                 entry.name()
             );
 
             match entry {
-                VirtualEntry::Folder(folder) => {
+                VirtualEntry::Folder(_folder) => {
                     reply.attr(
                         &TTL,
                         &FileAttr {
-                            ino: 1 + folder.inode,
+                            ino,
                             size: 0,
                             blocks: 0,
                             atime: UNIX_EPOCH,
@@ -420,8 +419,8 @@ impl Filesystem for VirtualMemoryFileSystem {
                     reply.attr(
                         &TTL,
                         &FileAttr {
-                            ino: 1 + file.inode,
-                            size: 13,  // TODO:
+                            ino,
+                            size: file.data_source.content_length().unwrap_or_default(),
                             blocks: 1, // TODO:
                             atime: UNIX_EPOCH,
                             mtime: UNIX_EPOCH,
@@ -452,15 +451,10 @@ impl Filesystem for VirtualMemoryFileSystem {
         size: u32,
         reply: ReplyData,
     ) {
-        println!(
-            "read: ino={}, fh={}, offset={} size={}",
-            ino, _fh, offset, size
-        );
-
         if let Some(entry) = self.file_system.get_mut(&(ino - 1)) {
             info!(
                 "getattr(): found file system entry: {} {}",
-                entry.inode(),
+                ino - 1,
                 entry.name()
             );
 
@@ -495,7 +489,7 @@ impl Filesystem for VirtualMemoryFileSystem {
         if let Some(entry) = self.file_system.get(&(ino - 1)) {
             info!(
                 "readdir(): found file system entry: {} {}",
-                entry.inode(),
+                ino - 1,
                 entry.name()
             );
 
@@ -507,17 +501,17 @@ impl Filesystem for VirtualMemoryFileSystem {
                     ];
 
                     // find each child entry and add them to the list
-                    for child in folder.children.iter() {
-                        if let Some(child_entry) = self.file_system.get(&child) {
+                    for child_inode in folder.children.iter() {
+                        if let Some(child_entry) = self.file_system.get(&child_inode) {
                             match child_entry {
                                 VirtualEntry::Folder(child_folder) => {
                                     trace!(
                                         "readdir(): adding child folder: {} {}",
-                                        child_folder.inode,
+                                        child_inode,
                                         child_folder.name
                                     );
                                     entries.push((
-                                        1 + child_folder.inode,
+                                        1 + child_inode,
                                         FileType::Directory,
                                         child_folder.name.clone(),
                                     ));
@@ -525,11 +519,11 @@ impl Filesystem for VirtualMemoryFileSystem {
                                 VirtualEntry::File(child_file) => {
                                     trace!(
                                         "readdir(): adding child file: {} {}",
-                                        child_file.inode,
+                                        child_inode,
                                         child_file.name
                                     );
                                     entries.push((
-                                        1 + child_file.inode,
+                                        1 + child_inode,
                                         FileType::RegularFile,
                                         child_file.name.clone(),
                                     ));

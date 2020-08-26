@@ -1,4 +1,4 @@
-use super::{VMFSConnectionExt, VirtualEntry, VirtualFile, VirtualFileDataSource};
+use super::{INode, VMFSConnectionExt, VirtualEntry, VirtualFile, VirtualFileDataSource};
 use crate::error::{Error, Result};
 use crate::state::{state_lock_sync, KernelHandle};
 
@@ -7,9 +7,12 @@ use memflow_core::*;
 pub struct VMFSConnectionMemory;
 
 impl VMFSConnectionExt for VMFSConnectionMemory {
-    fn entry(&self, inode: u64, conn_id: &str) -> Result<VirtualEntry> {
+    fn entry(
+        &self,
+        conn_id: &str,
+        _add_child: &mut dyn FnMut(VirtualEntry) -> u64,
+    ) -> Result<VirtualEntry> {
         Ok(VirtualEntry::File(VirtualFile {
-            inode,
             name: "mem".to_string(),
             data_source: Box::new(VMFSConnectionMemoryDS::new(&conn_id)),
         }))

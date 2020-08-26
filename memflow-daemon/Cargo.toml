@@ -33,3 +33,4 @@ pelite = { git = "https://github.com/ko1N/pelite", features = ["serde"] }
 
 # gdb
 gdbstub = "0.2"
+url = "2.1"
