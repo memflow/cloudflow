@@ -1,7 +1,9 @@
 mod connection_memory;
 mod module_dump;
+mod module_pe_header;
 mod process_info;
 mod process_memory;
+mod static_ds;
 
 use crate::error::Result;
 use crate::state::{state_lock_sync, CachedWin32Process, KernelHandle};
@@ -148,7 +150,10 @@ impl VirtualMemoryFileSystem {
                 Box::new(process_info::VMFSProcessInfo),
                 Box::new(process_memory::VMFSProcessMemory),
             ],
-            modules_modules: vec![Box::new(module_dump::VMFSModuleMemory)],
+            modules_modules: vec![
+                Box::new(module_pe_header::VMFSModulePEHeader),
+                Box::new(module_dump::VMFSModuleMemory),
+            ],
         };
 
         // initialize file_system

@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 memflow-core = { path = "../../memflow/memflow-core" }
-memflow-win32 = { path = "../../memflow/memflow-win32" }
+memflow-win32 = { path = "../../memflow/memflow-win32", features = ["serde_derive"] }
 log = "0.4.8"
 simple_logger = "1.0.1"
 lazy_static = "1.4"
@@ -29,6 +29,7 @@ time = "0.1"
 fuse = { git = "https://github.com/zargony/fuse-rs" }
 libc = "0.2.51"
 bitfield = "0.13.2"
+pelite = { git = "https://github.com/ko1N/pelite", features = ["serde"] }
 
 # gdb
 gdbstub = "0.2"

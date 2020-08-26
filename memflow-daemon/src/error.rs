@@ -32,6 +32,10 @@ pub enum Error {
     Core(memflow_core::error::Error),
     /// memflow win32 error
     Win32(memflow_win32::error::Error),
+    /// PE error.
+    ///
+    /// Catch-all for pe related errors.
+    PE(pelite::Error),
 }
 
 /// Convert from &str to error
@@ -55,6 +59,13 @@ impl convert::From<memflow_win32::error::Error> for Error {
     }
 }
 
+/// Convert from pelite::Error
+impl From<pelite::Error> for Error {
+    fn from(error: pelite::Error) -> Error {
+        Error::PE(error)
+    }
+}
+
 impl Error {
     /// Returns a tuple representing the error description and its string value.
     pub fn to_str_pair(self) -> (&'static str, Option<&'static str>) {
@@ -69,6 +80,7 @@ impl Error {
             Error::Connector(e) => ("connector error", Some(e)),
             Error::Core(e) => ("memflow core error", Some(e.to_str())),
             Error::Win32(e) => ("memflow win32 error", Some(e.to_str())),
+            Error::PE(e) => ("error handling pe", Some(e.to_str())),
         }
     }
 
