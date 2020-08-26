@@ -4,12 +4,17 @@ use crate::error::Result;
 pub struct VMFSProcessInfo;
 
 impl VMFSProcessExt for VMFSProcessInfo {
-    fn entry(&self, inode: u64, _conn_id: &str, process: &mut CachedWin32Process) -> VirtualEntry {
-        VirtualEntry::File(VirtualFile {
+    fn entry(
+        &self,
+        inode: u64,
+        _conn_id: &str,
+        process: &mut CachedWin32Process,
+    ) -> Result<VirtualEntry> {
+        Ok(VirtualEntry::File(VirtualFile {
             inode,
             name: "process_info".to_string(),
             data_source: Box::new(VMFSProcessInfoDS::new(format!("{:?}", process.proc_info))),
-        })
+        }))
     }
 }
 

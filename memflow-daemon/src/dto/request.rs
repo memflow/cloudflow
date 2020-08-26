@@ -11,6 +11,10 @@ pub enum Message {
     FuseListMounts,
     FuseUmount(FuseUmount),
 
+    GDBAttach(GDBAttach),
+    GDBList,
+    GDBDetach(GDBDetach),
+
     ListProcesses(ListProcesses),
     OpenProcess(OpenProcess),
 }
@@ -41,6 +45,19 @@ pub struct FuseMount {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FuseUmount {
     pub fuse_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GDBAttach {
+    pub conn_id: String,
+    pub pid: String,
+    pub addr: String,
+    // TODO: fetch file permissions for unix sockets
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GDBDetach {
+    pub gdb_id: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

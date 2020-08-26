@@ -55,34 +55,47 @@ async fn main() -> Result<()> {
                     request::Message::Connect(msg) => {
                         commands::connection::new(&mut serializer, msg)
                             .await
-                            .expect("failed to execute connect command")
+                            .expect("failed to execute command");
                     }
-                    request::Message::ListConnections => commands::connection::ls(&mut serializer)
-                        .await
-                        .expect("failed to execute list command"),
+                    request::Message::ListConnections => {
+                        commands::connection::ls(&mut serializer)
+                            .await
+                            .expect("failed to execute command");
+                    }
                     request::Message::CloseConnection(msg) => {
                         commands::connection::rm(&mut serializer, msg)
                             .await
-                            .expect("failed to execute list command")
+                            .expect("failed to execute command");
                     }
 
                     // TODO: make os specific
                     request::Message::FuseMount(msg) => commands::fuse::mount(&mut serializer, msg)
                         .await
-                        .expect("failed to execute fuse mount command"),
+                        .expect("failed to execute command"),
+
                     request::Message::FuseListMounts => commands::fuse::ls(&mut serializer)
                         .await
-                        .expect("failed to execute fuse ls command"),
+                        .expect("failed to execute command"),
+
                     request::Message::FuseUmount(msg) => {
                         commands::fuse::umount(&mut serializer, msg)
                             .await
-                            .expect("failed to execute fuse umount command")
+                            .expect("failed to execute command");
                     }
 
+                    request::Message::GDBAttach(msg) => commands::gdb::attach(&mut serializer, msg)
+                        .await
+                        .expect("failed to execute command"),
+                    request::Message::GDBList => commands::gdb::ls(&mut serializer)
+                        .await
+                        .expect("failed to execute command"),
+                    request::Message::GDBDetach(msg) => commands::gdb::detach(&mut serializer, msg)
+                        .await
+                        .expect("failed to execute command"),
                     request::Message::ListProcesses(msg) => {
                         commands::process::ls(&mut serializer, msg)
                             .await
-                            .expect("failed to execute process list command")
+                            .expect("failed to execute command");
                     }
                     request::Message::OpenProcess(_msg) => {
                         // TODO:

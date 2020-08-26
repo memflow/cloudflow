@@ -22,6 +22,10 @@ pub enum Error {
     ///
     /// Catch-all for socket write errors.
     SocketWrite,
+    /// GDB stub error
+    ///
+    /// Catch-all for gdb stub errors
+    GDB,
     /// Connector error
     Connector(&'static str),
     /// memflow core error
@@ -61,6 +65,7 @@ impl Error {
             Error::Deserialize => ("deserialization error", None),
             Error::SocketRead => ("socket read error", None),
             Error::SocketWrite => ("socket write error", None),
+            Error::GDB => ("gdb stub error", None),
             Error::Connector(e) => ("connector error", Some(e)),
             Error::Core(e) => ("memflow core error", Some(e.to_str())),
             Error::Win32(e) => ("memflow win32 error", Some(e.to_str())),

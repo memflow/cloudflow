@@ -19,6 +19,7 @@ fn main() {
         .subcommand(commands::connection::command_definition())
         .subcommand(commands::fuse::command_definition())
         .subcommand(commands::proc::command_definition())
+        .subcommand(commands::gdb::command_definition())
         .get_matches();
 
     /*
@@ -38,6 +39,7 @@ fn main() {
         }
         (commands::fuse::COMMAND_STR, Some(subargv)) => commands::fuse::handle_command(subargv),
         (commands::proc::COMMAND_STR, Some(subargv)) => commands::proc::handle_command(subargv),
+        (commands::gdb::COMMAND_STR, Some(subargv)) => commands::gdb::handle_command(subargv),
         _ => {
             // term.error(matches.usage()).unwrap();
             ::std::process::exit(1)

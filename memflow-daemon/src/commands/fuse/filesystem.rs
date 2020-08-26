@@ -1,5 +1,6 @@
 mod module_memory;
 mod process_info;
+mod process_memory;
 
 use crate::error::Result;
 use crate::state::{state_lock_sync, CachedWin32Process, KernelHandle};
@@ -88,11 +89,16 @@ pub trait VirtualFileDataSource {
 /// This is used to extend functionality of the vmfs and add files/folders in a modular way.
 
 pub trait VMFSConnectionExt {
-    fn entry(&self, inode: u64, conn_id: &str) -> VirtualEntry;
+    fn entry(&self, inode: u64, conn_id: &str) -> Result<VirtualEntry>;
 }
 
 pub trait VMFSProcessExt {
-    fn entry(&self, inode: u64, conn_id: &str, process: &mut CachedWin32Process) -> VirtualEntry;
+    fn entry(
+        &self,
+        inode: u64,
+        conn_id: &str,
+        process: &mut CachedWin32Process,
+    ) -> Result<VirtualEntry>;
 }
 
 pub trait VMFSModuleExt {
@@ -102,7 +108,7 @@ pub trait VMFSModuleExt {
         conn_id: &str,
         process: &mut CachedWin32Process,
         mod_info: &Win32ModuleInfo,
-    ) -> VirtualEntry;
+    ) -> Result<VirtualEntry>;
 }
 
 /// The Virtual Memory File System
@@ -137,7 +143,10 @@ impl VirtualMemoryFileSystem {
             file_system: HashMap::new(),
 
             modules_connections: Vec::new(),
-            modules_processes: vec![Box::new(process_info::VMFSProcessInfo)],
+            modules_processes: vec![
+                Box::new(process_info::VMFSProcessInfo),
+                Box::new(process_memory::VMFSProcessMemory),
+            ],
             modules_modules: vec![Box::new(module_memory::VMFSModuleMemory)],
         };
 
@@ -166,11 +175,12 @@ impl VirtualMemoryFileSystem {
         inode.set_mid(0);
         for module in self.modules_connections.iter() {
             inode.set_id(inode.id() + 1);
-            let fse = module.entry(inode.0, &self.conn_id); // TODO: handle recursive entries for folders+subfolders
-
-            // insert entry into filesystem and process
-            file_system.insert(inode.0, fse);
-            root_folder.children.push(inode.0);
+            if let Ok(fse) = module.entry(inode.0, &self.conn_id) {
+                // TODO: handle recursive entries for folders+subfolders
+                // insert entry into filesystem and process
+                file_system.insert(inode.0, fse);
+                root_folder.children.push(inode.0);
+            }
         }
 
         // inode for process entries is: pid-x-x
@@ -219,11 +229,12 @@ impl VirtualMemoryFileSystem {
         for module in self.modules_processes.iter() {
             // instantiate entry with a new id
             inode.set_id(inode.id() + 1);
-            let fse = module.entry(inode.0, &self.conn_id, &mut process); // TODO: handle recursive entries for folders+subfolders
-
-            // insert entry into filesystem and process
-            file_system.insert(inode.0, fse);
-            proc_folder.children.push(inode.0);
+            if let Ok(fse) = module.entry(inode.0, &self.conn_id, &mut process) {
+                // TODO: handle recursive entries for folders+subfolders
+                // insert entry into filesystem and process
+                file_system.insert(inode.0, fse);
+                proc_folder.children.push(inode.0);
+            }
         }
 
         // add all modules for this process
@@ -263,11 +274,12 @@ impl VirtualMemoryFileSystem {
         for module in self.modules_modules.iter() {
             // instantiate entry with a new id
             inode.set_id(inode.id() + 1);
-            let fse = module.entry(inode.0, &self.conn_id, process, &mod_info); // TODO: handle recursive entries for folders+subfolders
-
-            // insert entry into filesystem and process
-            file_system.insert(inode.0, fse);
-            module_folder.children.push(inode.0);
+            if let Ok(fse) = module.entry(inode.0, &self.conn_id, process, &mod_info) {
+                // TODO: handle recursive entries for folders+subfolders
+                // insert entry into filesystem and process
+                file_system.insert(inode.0, fse);
+                module_folder.children.push(inode.0);
+            }
         }
 
         let module_inode = module_folder.inode;
