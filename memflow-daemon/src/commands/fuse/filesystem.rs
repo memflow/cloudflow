@@ -84,7 +84,7 @@ pub struct VirtualFile {
 
 /// A trait for providing data for a VirtualFile
 pub trait VirtualFileDataSource {
-    fn content_length(&self) -> Result<u64>;
+    fn content_length(&mut self) -> Result<u64>;
     fn contents(&mut self, offset: i64, size: u32) -> Result<Vec<u8>>;
 }
 
@@ -309,8 +309,8 @@ impl Filesystem for VirtualMemoryFileSystem {
                 VirtualEntry::Folder(folder) => {
                     // match child entries by name
                     // TODO: maybe add a map?
-                    for child in folder.children.iter() {
-                        if let Some(child_entry) = self.file_system.get(&child) {
+                    for child in folder.children.clone().iter() {
+                        if let Some(child_entry) = self.file_system.get_mut(&child) {
                             // TODO: improve this check
                             if child_entry.name() == name.to_string_lossy() {
                                 trace!(

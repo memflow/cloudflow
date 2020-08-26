@@ -12,7 +12,7 @@ impl VMFSStaticDS {
 }
 
 impl VirtualFileDataSource for VMFSStaticDS {
-    fn content_length(&self) -> Result<u64> {
+    fn content_length(&mut self) -> Result<u64> {
         Ok(self.contents.len() as u64)
     }
 

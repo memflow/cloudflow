@@ -37,7 +37,7 @@ impl VMFSProcessMemoryDS {
 }
 
 impl VirtualFileDataSource for VMFSProcessMemoryDS {
-    fn content_length(&self) -> Result<u64> {
+    fn content_length(&mut self) -> Result<u64> {
         Ok(0)
     }
 

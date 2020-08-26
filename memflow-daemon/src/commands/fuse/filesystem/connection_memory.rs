@@ -29,7 +29,7 @@ impl VMFSConnectionMemoryDS {
 }
 
 impl VirtualFileDataSource for VMFSConnectionMemoryDS {
-    fn content_length(&self) -> Result<u64> {
+    fn content_length(&mut self) -> Result<u64> {
         Ok(0)
     }
 
