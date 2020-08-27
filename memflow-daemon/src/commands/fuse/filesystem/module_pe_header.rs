@@ -134,7 +134,7 @@ impl PeFileDS {
                             let iat = desc.iat().map_err(Error::PE)?;
                             let int = desc.int().map_err(Error::PE)?;
 
-                            for (va, import) in Iterator::zip(iat, int) {
+                            for (_va, import) in Iterator::zip(iat, int) {
                                 if let Ok(import) = import {
                                     match import {
                                         Import::ByName { hint: _, name } => {

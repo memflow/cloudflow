@@ -1,7 +1,5 @@
 use super::static_ds::VMFSStaticDS;
-use super::{
-    CachedWin32Process, INode, VMFSProcessExt, VirtualEntry, VirtualFile, VirtualFileDataSource,
-};
+use super::{CachedWin32Process, VMFSProcessExt, VirtualEntry, VirtualFile};
 use crate::error::Result;
 
 pub struct VMFSProcessInfo;

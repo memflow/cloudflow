@@ -35,6 +35,16 @@ bitfield! {
     pub id, set_id: 63, 48;
 }
 
+impl INode {
+    pub fn new(pid: u64, mid: u64, id: u64) -> Self {
+        let mut inode = INode(0);
+        inode.set_pid(pid);
+        inode.set_mid(mid);
+        inode.set_id(id);
+        inode
+    }
+}
+
 /// Entries of the vmfs can either be Files or Folders.
 /// This enum is used when building a tree structure for the vmfs.
 pub enum VirtualEntry {
@@ -120,9 +130,9 @@ pub struct VirtualMemoryFileSystem {
     last_refresh: Instant,
     file_system: HashMap<u64, VirtualEntry>,
 
-    modules_connections: Vec<Box<dyn VMFSConnectionExt>>,
-    modules_processes: Vec<Box<dyn VMFSProcessExt>>,
-    modules_modules: Vec<Box<dyn VMFSModuleExt>>,
+    ext_connections: Vec<Box<dyn VMFSConnectionExt>>,
+    ext_processes: Vec<Box<dyn VMFSProcessExt>>,
+    ext_modules: Vec<Box<dyn VMFSModuleExt>>,
 }
 
 unsafe impl Send for VirtualMemoryFileSystem {}
@@ -139,12 +149,12 @@ impl VirtualMemoryFileSystem {
             last_refresh: Instant::now(),
             file_system: HashMap::new(),
 
-            modules_connections: vec![Box::new(connection_memory::VMFSConnectionMemory)],
-            modules_processes: vec![
+            ext_connections: vec![Box::new(connection_memory::VMFSConnectionMemory)],
+            ext_processes: vec![
                 Box::new(process_info::VMFSProcessInfo),
                 Box::new(process_memory::VMFSProcessMemory),
             ],
-            modules_modules: vec![
+            ext_modules: vec![
                 Box::new(module_pe_header::VMFSModulePEHeader),
                 Box::new(module_dump::VMFSModuleMemory),
             ],
@@ -167,24 +177,26 @@ impl VirtualMemoryFileSystem {
         // TODO: incremental updates for changed pids
         let mut file_system = HashMap::new();
 
-        let mut inode = INode(0);
-        let root_inode = INode(inode.0);
+        let root_inode = INode::new(0, 0, 0);
         let mut root_folder = VirtualFolder::new(&self.conn_id);
 
-        // add all vmfs modules for the connection scope
-        // inode for connection entries is: 0-0-x
-        inode.set_mid(0);
-        for module in self.modules_connections.iter() {
-            if let Ok(fse) = module.entry(&self.conn_id, &mut |fse| {
-                inode.set_id(inode.id() + 1);
-                file_system.insert(inode.0, fse);
-                inode.0
+        // add all vmfs modules for the connection scope (inode 0-0-x)
+        let mut ext_inode = INode::new(0, 0, 0);
+        for ext in self.ext_connections.iter() {
+            if let Ok(fse) = ext.entry(&self.conn_id, &mut |fse| {
+                ext_inode.set_id(ext_inode.id() + 1);
+                file_system.insert(ext_inode.0, fse);
+                ext_inode.0
             }) {
-                inode.set_id(inode.id() + 1);
-                file_system.insert(inode.0, fse);
-                root_folder.children.push(inode.0);
+                ext_inode.set_id(ext_inode.id() + 1);
+                file_system.insert(ext_inode.0, fse);
+                root_folder.children.push(ext_inode.0);
             }
         }
+
+        // add 'process' folder (inode 0-1-0)
+        let process_inode = INode::new(0, 1, 0);
+        let mut process_folder = VirtualFolder::new("process");
 
         // inode for process entries is: pid-x-x
         let mut state = state_lock_sync();
@@ -193,10 +205,10 @@ impl VirtualMemoryFileSystem {
                 KernelHandle::Win32(kernel) => {
                     if let Ok(process_info) = kernel.process_info_list() {
                         for pi in process_info.iter() {
+                            let proc_inode = INode::new(1 + pi.pid as u64, 0, 0);
                             let process = Win32Process::with_kernel_ref(kernel, pi.clone());
-                            inode.set_pid(process.proc_info.pid as u64);
-                            root_folder.children.push(self.create_process_folder(
-                                INode(inode.0),
+                            process_folder.children.push(self.create_process_folder(
+                                INode(proc_inode.0),
                                 process,
                                 &mut file_system,
                             ));
@@ -206,8 +218,42 @@ impl VirtualMemoryFileSystem {
             }
         }
 
-        file_system.insert(root_inode.0, VirtualEntry::Folder(root_folder));
+        // insert process node
+        root_folder.children.push(process_inode.0);
+        file_system.insert(process_inode.0, VirtualEntry::Folder(process_folder));
 
+        // add 'driver' folder (inode 1-0-0)
+        let driver_inode = INode::new(1, 0, 0);
+        let mut driver_folder = VirtualFolder::new("driver");
+
+        if let Some(conn) = state.connection_mut(&self.conn_id) {
+            match &mut conn.kernel {
+                KernelHandle::Win32(kernel) => {
+                    if let Ok(pi) = kernel.kernel_process_info() {
+                        let mut process = Win32Process::with_kernel_ref(kernel, pi.clone());
+                        if let Ok(module_info) = process.module_info_list() {
+                            let mut mod_inode = INode(driver_inode.0);
+                            for mi in module_info.iter() {
+                                mod_inode.set_mid(mod_inode.mid() + 1);
+                                driver_folder.children.push(self.create_module_folder(
+                                    INode(mod_inode.0),
+                                    &mut process,
+                                    mi,
+                                    &mut file_system,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // insert driver node
+        root_folder.children.push(driver_inode.0);
+        file_system.insert(driver_inode.0, VirtualEntry::Folder(driver_folder));
+
+        // insert root node
+        file_system.insert(root_inode.0, VirtualEntry::Folder(root_folder));
         file_system
     }
 
@@ -227,9 +273,9 @@ impl VirtualMemoryFileSystem {
         // add all vmfs modules for the process scope
         // inode for process module entries is: pid-0-x
         inode.set_mid(0);
-        for module in self.modules_processes.iter() {
+        for ext in self.ext_processes.iter() {
             // instantiate entry with a new id
-            if let Ok(fse) = module.entry(&self.conn_id, &mut process, &mut |fse| {
+            if let Ok(fse) = ext.entry(&self.conn_id, &mut process, &mut |fse| {
                 inode.set_id(inode.id() + 1);
                 file_system.insert(inode.0, fse);
                 inode.0
@@ -275,9 +321,9 @@ impl VirtualMemoryFileSystem {
         ));
 
         // add all vmfs modules for the module scope
-        for module in self.modules_modules.iter() {
+        for ext in self.ext_modules.iter() {
             // instantiate entry with a new id
-            if let Ok(fse) = module.entry(&self.conn_id, process, &mod_info, &mut |fse| {
+            if let Ok(fse) = ext.entry(&self.conn_id, process, &mod_info, &mut |fse| {
                 inode.set_id(inode.id() + 1);
                 file_system.insert(inode.0, fse);
                 inode.0
@@ -318,7 +364,7 @@ impl Filesystem for VirtualMemoryFileSystem {
                                     child_entry.name()
                                 );
                                 match child_entry {
-                                    VirtualEntry::Folder(child_folder) => {
+                                    VirtualEntry::Folder(_child_folder) => {
                                         reply.entry(
                                             &TTL,
                                             &FileAttr {

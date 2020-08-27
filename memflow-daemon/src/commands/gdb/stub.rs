@@ -6,15 +6,14 @@ use std::net::{TcpListener, TcpStream};
 use std::os::unix::net::{UnixListener, UnixStream};
 
 use log::info;
-use url::{Host, Origin, Url};
+use url::Url;
 
 use gdbstub::{
-    arch, BreakOp, Connection, DisconnectReason, GdbStub, OptResult, ResumeAction, StopReason,
-    Target, Tid, TidSelector, WatchKind, SINGLE_THREAD_TID,
+    arch, BreakOp, Connection, DisconnectReason, GdbStub, ResumeAction, StopReason, Target, Tid,
+    TidSelector, SINGLE_THREAD_TID,
 };
 
 use memflow_core::*;
-use memflow_win32::*;
 
 // TODO: better error handling
 fn wait_for_tcp(sockaddr: &str) -> Result<TcpStream> {
@@ -92,7 +91,7 @@ pub fn new_gdb_stub(id: &str, conn_id: &str, pid: PID, addr: &str) -> Result<()>
 
 /// Implementation of the Virtual Memory GDB Stub
 pub struct VMGDBStub {
-    id: String,
+    _id: String,
     conn_id: String,
     pid: PID, // ?
 }
@@ -100,7 +99,7 @@ pub struct VMGDBStub {
 impl VMGDBStub {
     pub fn new(id: &str, conn_id: &str, pid: PID) -> Self {
         Self {
-            id: id.to_string(),
+            _id: id.to_string(),
             conn_id: conn_id.to_string(),
             pid,
         }

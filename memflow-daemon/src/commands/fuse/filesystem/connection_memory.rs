@@ -1,4 +1,4 @@
-use super::{INode, VMFSConnectionExt, VirtualEntry, VirtualFile, VirtualFileDataSource};
+use super::{VMFSConnectionExt, VirtualEntry, VirtualFile, VirtualFileDataSource};
 use crate::error::{Error, Result};
 use crate::state::{state_lock_sync, KernelHandle};
 

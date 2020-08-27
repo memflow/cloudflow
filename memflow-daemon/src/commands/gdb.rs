@@ -4,12 +4,10 @@ use crate::dispatch::*;
 use crate::dto::request;
 use crate::error::Result;
 use crate::response;
-use crate::state::{new_uuid, state_lock_sync, FileSystemHandle, STATE};
+use crate::state::{new_uuid, STATE};
 
 use futures::Sink;
 use std::marker::Unpin;
-
-use std::ffi::OsStr;
 
 use memflow_core::PID;
 
@@ -119,12 +117,12 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()>
 }
 
 pub async fn detach<S: Sink<response::Message> + Unpin>(
-    frame: &mut S,
-    msg: request::GDBDetach,
+    _frame: &mut S,
+    _msg: request::GDBDetach,
 ) -> Result<()> {
+    /*
     let mut state = STATE.lock().await;
 
-    /*
     if state.file_systems.contains_key(&msg.fuse_id) {
         let conn_id = state
             .file_systems

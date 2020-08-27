@@ -1,6 +1,4 @@
-use super::{
-    CachedWin32Process, INode, VMFSModuleExt, VirtualEntry, VirtualFile, VirtualFileDataSource,
-};
+use super::{CachedWin32Process, VMFSModuleExt, VirtualEntry, VirtualFile, VirtualFileDataSource};
 use crate::error::{Error, Result};
 use crate::state::{state_lock_sync, KernelHandle};
 
