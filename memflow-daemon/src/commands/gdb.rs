@@ -79,7 +79,7 @@ pub async fn attach<S: Sink<response::Message> + Unpin>(
 
         send_ok(frame).await
     } else {
-        send_log_error(
+        send_err(
             frame,
             &format!("no connection with id {} found", msg.conn_id),
         )
