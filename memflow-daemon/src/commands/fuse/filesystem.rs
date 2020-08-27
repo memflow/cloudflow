@@ -230,7 +230,7 @@ impl VirtualMemoryFileSystem {
             match &mut conn.kernel {
                 KernelHandle::Win32(kernel) => {
                     if let Ok(pi) = kernel.kernel_process_info() {
-                        let mut process = Win32Process::with_kernel_ref(kernel, pi.clone());
+                        let mut process = Win32Process::with_kernel_ref(kernel, pi);
                         if let Ok(module_info) = process.module_info_list() {
                             let mut mod_inode = INode(driver_inode.0);
                             for mi in module_info.iter() {
