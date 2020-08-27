@@ -1,3 +1,4 @@
+mod connection_dump;
 mod connection_memory;
 mod module_dump;
 mod module_pe_header;
@@ -149,7 +150,10 @@ impl VirtualMemoryFileSystem {
             last_refresh: Instant::now(),
             file_system: HashMap::new(),
 
-            ext_connections: vec![Box::new(connection_memory::VMFSConnectionMemory)],
+            ext_connections: vec![
+                Box::new(connection_memory::VMFSConnectionMemory),
+                Box::new(connection_dump::VMFSConnectionDump),
+            ],
             ext_processes: vec![
                 Box::new(process_info::VMFSProcessInfo),
                 Box::new(process_memory::VMFSProcessMemory),
@@ -231,7 +235,7 @@ impl VirtualMemoryFileSystem {
                 KernelHandle::Win32(kernel) => {
                     if let Ok(pi) = kernel.kernel_process_info() {
                         let mut process = Win32Process::with_kernel_ref(kernel, pi);
-                        if let Ok(module_info) = process.module_info_list() {
+                        if let Ok(module_info) = process.module_list() {
                             let mut mod_inode = INode(driver_inode.0);
                             for mi in module_info.iter() {
                                 mod_inode.set_mid(mod_inode.mid() + 1);
@@ -288,7 +292,7 @@ impl VirtualMemoryFileSystem {
 
         // add all modules for this process
         // inode for module entries is: pid-x-y
-        if let Ok(modules) = process.module_info_list() {
+        if let Ok(modules) = process.module_list() {
             for mi in modules.iter() {
                 inode.set_mid(inode.mid() + 1); // increase mid for each module
                 proc_folder.children.push(self.create_module_folder(
