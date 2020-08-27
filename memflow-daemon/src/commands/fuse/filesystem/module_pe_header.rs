@@ -162,7 +162,7 @@ impl PeFileDS {
                             if let Ok(name_it) = pe.derva_c_str(name_rva) {
                                 if let Ok(name_str) = std::str::from_utf8(name_it.as_ref()) {
                                     out.push_str(&format!(
-                                        "{} = {}!{:x} ({:x})\n",
+                                        "{} = {}!0x{:x} (0x{:x})\n",
                                         name_str,
                                         self.mod_info.name,
                                         function_rva,
