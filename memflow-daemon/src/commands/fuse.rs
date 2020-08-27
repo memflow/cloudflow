@@ -3,14 +3,14 @@ use filesystem::VirtualMemoryFileSystem;
 
 use crate::dispatch::*;
 use crate::dto::request;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::response;
 use crate::state::{new_uuid, state_lock_sync, FileSystemHandle, STATE};
 
 use futures::Sink;
-use std::marker::Unpin;
-
 use std::ffi::OsStr;
+use std::marker::Unpin;
+use std::path::Path;
 
 pub async fn mount<S: Sink<response::Message> + Unpin>(
     frame: &mut S,
@@ -23,44 +23,57 @@ pub async fn mount<S: Sink<response::Message> + Unpin>(
     // - if the dir was created just rm it here again (if its empty + umounted)
     // fallback for the mountpath should be PWD + "./alias or id"
 
-    // check if connection is valid and increase ref count
-    if let Some(conn) = state.connection_mut(&msg.conn_id) {
-        conn.refcount += 1;
+    let is_empty = Path::new(&msg.mount_point)
+        .read_dir()
+        .map_err(|_| Error::Other("mount point not found"))?
+        .next()
+        .is_none();
+    if is_empty {
+        // check if connection is valid and increase ref count
+        if let Some(conn) = state.connection_mut(&msg.conn_id) {
+            conn.refcount += 1;
 
-        // spawn a thread to move this out of the async runtime
-        std::thread::spawn(move || {
-            println!("uid={} gid={}", msg.uid, msg.gid);
+            // spawn a thread to move this out of the async runtime
+            std::thread::spawn(move || {
+                println!("uid={} gid={}", msg.uid, msg.gid);
 
-            let opts = [
-                "-o",
-                "ro",
-                "-o",
-                &format!("fsname=hello,allow_other,uid={},gid={}", msg.uid, msg.gid),
-            ];
-            let mntopts = opts.iter().map(|o| o.as_ref()).collect::<Vec<&OsStr>>();
+                let opts = [
+                    "-o",
+                    "ro",
+                    "-o",
+                    &format!("fsname=hello,allow_other,uid={},gid={}", msg.uid, msg.gid),
+                ];
+                let mntopts = opts.iter().map(|o| o.as_ref()).collect::<Vec<&OsStr>>();
 
-            // TODO: chmod?
-            let fuse_id = new_uuid();
-            let vmfs = VirtualMemoryFileSystem::new(&fuse_id, &msg.conn_id, msg.uid, msg.gid);
+                // TODO: chmod?
+                let fuse_id = new_uuid();
+                let vmfs = VirtualMemoryFileSystem::new(&fuse_id, &msg.conn_id, msg.uid, msg.gid);
 
-            // TODO: use fuse::spawn_mount to have a convenient umoutn command in memflow?
-            // blocks until the fs is umount-ed
-            let file_system =
-                unsafe { fuse::spawn_mount(vmfs, msg.mount_point.clone(), &mntopts) }.unwrap();
+                // TODO: use fuse::spawn_mount to have a convenient umoutn command in memflow?
+                // blocks until the fs is umount-ed
+                let file_system =
+                    unsafe { fuse::spawn_mount(vmfs, msg.mount_point.clone(), &mntopts) }.unwrap();
 
-            // grab state and add the new file_system
-            let mut state = state_lock_sync();
-            state.file_systems.insert(
-                fuse_id.clone(),
-                FileSystemHandle::new(&fuse_id, &msg.conn_id, &msg.mount_point, file_system),
-            );
-        });
+                // grab state and add the new file_system
+                let mut state = state_lock_sync();
+                state.file_systems.insert(
+                    fuse_id.clone(),
+                    FileSystemHandle::new(&fuse_id, &msg.conn_id, &msg.mount_point, file_system),
+                );
+            });
 
-        send_ok(frame).await
+            send_ok(frame).await
+        } else {
+            send_err(
+                frame,
+                &format!("no connection with id {} found", msg.conn_id),
+            )
+            .await
+        }
     } else {
         send_err(
             frame,
-            &format!("no connection with id {} found", msg.conn_id),
+            &format!("mount point {} is not empty", msg.mount_point),
         )
         .await
     }

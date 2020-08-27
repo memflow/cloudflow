@@ -150,6 +150,7 @@ async fn main() -> Result<()> {
     perms.set_mode(0o664);
     std::fs::set_permissions(SOCKET_FILE, perms).unwrap();
 
+    // TODO: maybe this is unnecessary if we run the daemon under the memflow group
     // change ownership
     let gid = unsafe { get_gid_by_name("memflow") }
         .ok_or_else(|| Error::Other("unable to find memflow group"))?;
