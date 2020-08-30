@@ -1,630 +1,887 @@
-mod connection_dump;
-mod connection_memory;
-mod module_dump;
-mod module_pe_header;
-mod process_info;
-mod process_memory;
-mod static_ds;
+mod scopes;
+use scopes::ConnectionScope;
 
-use crate::error::Result;
-use crate::state::{state_lock_sync, CachedWin32Process, KernelHandle};
+use crate::error::{Error, Result};
+use crate::state::{new_uuid, state_lock_sync, FileSystemHandle, KernelHandle};
 
-use bitfield::bitfield;
-use std::collections::HashMap;
-use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::cell::RefCell;
+use std::ffi::{OsStr, OsString};
+use std::path::Path;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
-use log::{info, trace};
+use log::info;
 
-use memflow_win32::*;
+use fuse_mt::*;
+use time::*;
 
-use fuse::{
-    FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request,
-};
-use libc::ENOENT;
-use std::ffi::OsStr;
+use memflow_core::mem::phys_mem::PhysicalMemory;
 
-/// Default file TTL
-const TTL: Duration = Duration::from_secs(1);
+pub type ChildrenList = Vec<Arc<Box<dyn FileSystemEntry>>>;
 
-bitfield! {
-    /// Describes an INode in the VMFS
-    /// This bitfield struct is used to ensure that processes with the same PID end up with the same inodes.
-    pub struct INode(u64);
-    impl Debug;
-    pub pid, set_pid: 31, 0;
-    pub mid, set_mid: 47, 32;
-    pub id, set_id: 63, 48;
-}
+/// Trait describing an entry into the virtual filesystem.
+pub trait FileSystemEntry: Send + Sync {
+    /// The name of the entry
+    fn name(&self) -> &str;
 
-impl INode {
-    pub fn new(pid: u64, mid: u64, id: u64) -> Self {
-        let mut inode = INode(0);
-        inode.set_pid(pid);
-        inode.set_mid(mid);
-        inode.set_id(id);
-        inode
+    /// Decides wether or not this entry is a leaf or node (file or folder)
+    fn is_leaf(&self) -> bool;
+
+    /// Returns the children of this entry if it is not a leaf
+    fn children(&self) -> Option<ChildrenList> {
+        None
+    }
+
+    /// Returns the size of the leaf in bytes
+    fn size(&self) -> usize {
+        0
+    }
+
+    /// Returns the writable state of this leaf
+    fn is_writable(&self) -> bool {
+        false
+    }
+
+    /// Tries to open the leaf
+    fn open(&self) -> Result<Box<dyn FileSystemFileHandler>> {
+        Err(Error::Other("unable to open file"))
     }
 }
 
-/// Entries of the vmfs can either be Files or Folders.
-/// This enum is used when building a tree structure for the vmfs.
-pub enum VirtualEntry {
-    Folder(VirtualFolder),
-    File(VirtualFile),
+/// Extension trait for Boxed `FileSystemEntry` structures
+/// that enables recursive iteration over a path.
+trait FileSystemTraverse {
+    fn traverse_children<'a>(
+        &self,
+        path: &'a [&'a OsStr],
+    ) -> (Option<Arc<Box<dyn FileSystemEntry>>>, &'a [&'a OsStr]);
 }
 
-impl VirtualEntry {
-    pub fn name(&self) -> &str {
-        match self {
-            VirtualEntry::Folder(folder) => &folder.name,
-            VirtualEntry::File(file) => &file.name,
+impl<T: FileSystemEntry + ?Sized> FileSystemTraverse for Box<T> {
+    fn traverse_children<'a>(
+        &self,
+        path: &'a [&'a OsStr],
+    ) -> (Option<Arc<Box<dyn FileSystemEntry>>>, &'a [&'a OsStr]) {
+        if let Some(children) = self.children() {
+            for child in children.into_iter() {
+                if child.name() == path[0] {
+                    if path.len() > 1 {
+                        return child.traverse_children(&path[1..]);
+                    } else {
+                        return (Some(child), path);
+                    }
+                }
+            }
         }
+        (None, path)
     }
 }
 
-/// A folder in the vmfs.
-pub struct VirtualFolder {
-    pub name: String,
-    pub children: Vec<u64>,
+/// Container structure that holds the children of a `FileSystemEntry`.
+/// The child list will be invalidated every 5 seconds and
+/// the closure is called again to retrieve a new set of elements.
+struct FileSystemChildren {
+    children: RefCell<Option<ChildrenList>>,
+    last_refresh: RefCell<Instant>,
 }
 
-impl VirtualFolder {
-    pub fn new(name: &str) -> Self {
+// TODO:
+unsafe impl Send for FileSystemChildren {}
+unsafe impl Sync for FileSystemChildren {}
+
+impl Default for FileSystemChildren {
+    fn default() -> Self {
         Self {
-            name: name.to_string(),
-            children: Vec::new(),
+            children: RefCell::new(None),
+            last_refresh: RefCell::new(Instant::now()),
         }
     }
 }
 
-/// A file in the vmfs.
-pub struct VirtualFile {
-    pub name: String,
-    pub data_source: Box<dyn VirtualFileDataSource>,
+impl FileSystemChildren {
+    /// Retrieves the current list of children or executes the closure
+    /// to retrieve a new list of children and stores them internally.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crate::commands::fuse::filesystem::FileSystemChildren;
+    ///
+    /// let mut children = FileSystemChildren::default();
+    ///
+    /// let child_list = children.get_or_insert(|| {
+    ///     vec![
+    ///         Box::new(DriverRootFolder::new(self.kernel.clone())),
+    ///         Box::new(ProcessRootFolder::new(self.kernel.clone())),
+    ///         Box::new(PhysicalDumpFile::new(self.kernel.clone())),
+    ///     ]
+    /// });
+    /// ```
+    pub fn get_or_insert<F>(&self, insert: F) -> ChildrenList
+    where
+        F: FnOnce() -> Vec<Box<dyn FileSystemEntry>>,
+    {
+        {
+            let mut children = self.children.borrow_mut();
+            let mut last_refresh = self.last_refresh.borrow_mut();
+
+            if children.is_none() || last_refresh.elapsed() > Duration::from_secs(5) {
+                children.replace(
+                    insert()
+                        .into_iter()
+                        .map(|f| Arc::new(f))
+                        .collect::<Vec<_>>(),
+                );
+                *last_refresh = Instant::now();
+            }
+        }
+
+        self.children.borrow().as_ref().unwrap().clone()
+    }
 }
 
-/// A trait for providing data for a VirtualFile
-pub trait VirtualFileDataSource {
-    fn content_length(&mut self) -> Result<u64>;
-    fn contents(&mut self, offset: i64, size: u32) -> Result<Vec<u8>>;
+/// Trait implementing basic read/write operations on an opened file.
+pub trait FileSystemFileHandler {
+    fn read(&mut self, offset: u64, size: u32) -> Result<Vec<u8>>;
+    fn write(&mut self, _offset: u64, _data: Vec<u8>) -> Result<usize> {
+        Err(Error::Other("unable to write to file"))
+    }
 }
 
-/// Trait describing a module of the vmfs.
-/// This is used to extend functionality of the vmfs and add files/folders in a modular way.
-
-pub trait VMFSConnectionExt {
-    fn entry(
-        &self,
-        conn_id: &str,
-        add_child: &mut dyn FnMut(VirtualEntry) -> u64,
-    ) -> Result<VirtualEntry>;
+/// Helper struct that contains all current file handles
+struct FileHandles {
+    file_handle: u64,
+    handles: Vec<(u64, Arc<Mutex<Box<dyn FileSystemFileHandler>>>)>,
 }
 
-pub trait VMFSProcessExt {
-    fn entry(
-        &self,
-        conn_id: &str,
-        process: &mut CachedWin32Process,
-        add_child: &mut dyn FnMut(VirtualEntry) -> u64,
-    ) -> Result<VirtualEntry>;
+// TODO:
+unsafe impl Send for FileHandles {}
+unsafe impl Sync for FileHandles {}
+
+impl Default for FileHandles {
+    fn default() -> Self {
+        Self {
+            file_handle: 0,
+            handles: Vec::new(),
+        }
+    }
 }
 
-pub trait VMFSModuleExt {
-    fn entry(
-        &self,
-        conn_id: &str,
-        process: &mut CachedWin32Process,
-        mod_info: &Win32ModuleInfo,
-        add_child: &mut dyn FnMut(VirtualEntry) -> u64,
-    ) -> Result<VirtualEntry>;
+impl FileHandles {
+    pub fn insert(&mut self, entry: Box<dyn FileSystemFileHandler>) -> u64 {
+        self.file_handle += 1;
+        self.handles
+            .push((self.file_handle, Arc::new(Mutex::new(entry))));
+        self.file_handle
+    }
+
+    pub fn get(&self, handle: u64) -> Option<Arc<Mutex<Box<dyn FileSystemFileHandler>>>> {
+        self.handles
+            .iter()
+            .find(|h| h.0 == handle)
+            .map(|h| h.1.clone())
+    }
+
+    pub fn remove(&mut self, handle: u64) {
+        self.handles.retain(|h| h.0 != handle);
+    }
 }
 
 /// The Virtual Memory File System
-/// ...
+/// TODO: add more text
 pub struct VirtualMemoryFileSystem {
     id: String,
     conn_id: String,
+    mount_point: String,
 
     uid: u32,
     gid: u32,
+    readonly: bool,
 
-    last_refresh: Instant,
-    file_system: HashMap<u64, VirtualEntry>,
+    root: Arc<Box<dyn FileSystemEntry>>,
 
-    ext_connections: Vec<Box<dyn VMFSConnectionExt>>,
-    ext_processes: Vec<Box<dyn VMFSProcessExt>>,
-    ext_modules: Vec<Box<dyn VMFSModuleExt>>,
+    opened_files: RwLock<FileHandles>,
 }
 
-unsafe impl Send for VirtualMemoryFileSystem {}
-
 impl VirtualMemoryFileSystem {
-    pub fn new(id: &str, conn_id: &str, uid: u32, gid: u32) -> Self {
-        let mut fs = Self {
-            id: id.to_string(),
+    pub fn new(conn_id: &str, mount_point: &str, kernel: KernelHandle, uid: u32, gid: u32) -> Self {
+        let readonly = match &kernel {
+            KernelHandle::Win32(kernel) => kernel.phys_mem.metadata().readonly,
+        };
+
+        Self {
+            id: new_uuid(),
             conn_id: conn_id.to_string(),
+            mount_point: mount_point.to_string(),
 
             uid,
             gid,
+            readonly,
 
-            last_refresh: Instant::now(),
-            file_system: HashMap::new(),
+            root: Arc::new(Box::new(ConnectionScope::new(kernel))),
 
-            ext_connections: vec![
-                Box::new(connection_memory::VMFSConnectionMemory),
-                Box::new(connection_dump::VMFSConnectionDump),
-            ],
-            ext_processes: vec![
-                Box::new(process_info::VMFSProcessInfo),
-                Box::new(process_memory::VMFSProcessMemory),
-            ],
-            ext_modules: vec![
-                Box::new(module_pe_header::VMFSModulePEHeader),
-                Box::new(module_dump::VMFSModuleMemory),
-            ],
-        };
-
-        // initialize file_system
-        fs.file_system = fs.create_root_folder();
-
-        fs
-    }
-
-    fn update_file_system(&mut self) {
-        if self.last_refresh.elapsed() > Duration::from_secs(10) {
-            self.file_system = self.create_root_folder();
-            self.last_refresh = Instant::now();
+            opened_files: RwLock::new(FileHandles::default()),
         }
     }
 
-    fn create_root_folder(&self) -> HashMap<u64, VirtualEntry> {
-        // TODO: incremental updates for changed pids
-        let mut file_system = HashMap::new();
-
-        let root_inode = INode::new(0, 0, 0);
-        let mut root_folder = VirtualFolder::new(&self.conn_id);
-
-        // add all vmfs modules for the connection scope (inode 0-0-x)
-        let mut ext_inode = INode::new(0, 0, 0);
-        for ext in self.ext_connections.iter() {
-            if let Ok(fse) = ext.entry(&self.conn_id, &mut |fse| {
-                ext_inode.set_id(ext_inode.id() + 1);
-                file_system.insert(ext_inode.0, fse);
-                ext_inode.0
-            }) {
-                ext_inode.set_id(ext_inode.id() + 1);
-                file_system.insert(ext_inode.0, fse);
-                root_folder.children.push(ext_inode.0);
-            }
+    pub fn find_node(&self, path: &[&OsStr]) -> Option<Arc<Box<dyn FileSystemEntry>>> {
+        if path.len() > 1 {
+            // skip over root '/'
+            let child = self.root.traverse_children(&path[1..]);
+            child.0
+        } else {
+            Some(self.root.clone())
         }
+    }
+}
 
-        // add 'process' folder (inode 0-1-0)
-        let process_inode = INode::new(0, 1, 0);
-        let mut process_folder = VirtualFolder::new("process");
+const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 
-        // inode for process entries is: pid-x-x
+impl FilesystemMT for VirtualMemoryFileSystem {
+    /// Called on mount, before any other function.
+    fn init(&self, _req: RequestInfo) -> ResultEmpty {
+        // grab state and insert the reference
         let mut state = state_lock_sync();
         if let Some(conn) = state.connection_mut(&self.conn_id) {
-            match &mut conn.kernel {
-                KernelHandle::Win32(kernel) => {
-                    if let Ok(process_info) = kernel.process_info_list() {
-                        for pi in process_info.iter() {
-                            let proc_inode = INode::new(1 + pi.pid as u64, 0, 0);
-                            let process = Win32Process::with_kernel_ref(kernel, pi.clone());
-                            process_folder.children.push(self.create_process_folder(
-                                INode(proc_inode.0),
-                                process,
-                                &mut file_system,
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-
-        // insert process node
-        root_folder.children.push(process_inode.0);
-        file_system.insert(process_inode.0, VirtualEntry::Folder(process_folder));
-
-        // add 'driver' folder (inode 1-0-0)
-        let driver_inode = INode::new(1, 0, 0);
-        let mut driver_folder = VirtualFolder::new("driver");
-
-        if let Some(conn) = state.connection_mut(&self.conn_id) {
-            match &mut conn.kernel {
-                KernelHandle::Win32(kernel) => {
-                    if let Ok(pi) = kernel.kernel_process_info() {
-                        let mut process = Win32Process::with_kernel_ref(kernel, pi);
-                        if let Ok(module_info) = process.module_list() {
-                            let mut mod_inode = INode(driver_inode.0);
-                            for mi in module_info.iter() {
-                                mod_inode.set_mid(mod_inode.mid() + 1);
-                                driver_folder.children.push(self.create_module_folder(
-                                    INode(mod_inode.0),
-                                    &mut process,
-                                    mi,
-                                    &mut file_system,
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // insert driver node
-        root_folder.children.push(driver_inode.0);
-        file_system.insert(driver_inode.0, VirtualEntry::Folder(driver_folder));
-
-        // insert root node
-        file_system.insert(root_inode.0, VirtualEntry::Folder(root_folder));
-        file_system
-    }
-
-    fn create_process_folder(
-        &self,
-        mut inode: INode,
-        mut process: CachedWin32Process,
-        file_system: &mut HashMap<u64, VirtualEntry>,
-    ) -> u64 {
-        let proc_inode = INode(inode.0);
-        let mut proc_folder = VirtualFolder::new(&format!(
-            "{}_{}",
-            process.proc_info.pid,
-            process.proc_info.name.replace(".", "_")
-        ));
-
-        // add all vmfs modules for the process scope
-        // inode for process module entries is: pid-0-x
-        inode.set_mid(0);
-        for ext in self.ext_processes.iter() {
-            // instantiate entry with a new id
-            if let Ok(fse) = ext.entry(&self.conn_id, &mut process, &mut |fse| {
-                inode.set_id(inode.id() + 1);
-                file_system.insert(inode.0, fse);
-                inode.0
-            }) {
-                inode.set_id(inode.id() + 1);
-                file_system.insert(inode.0, fse);
-                proc_folder.children.push(inode.0);
-            }
-        }
-
-        // add all modules for this process
-        // inode for module entries is: pid-x-y
-        if let Ok(modules) = process.module_list() {
-            for mi in modules.iter() {
-                inode.set_mid(inode.mid() + 1); // increase mid for each module
-                proc_folder.children.push(self.create_module_folder(
-                    INode(inode.0),
-                    &mut process,
-                    mi,
-                    file_system,
-                ));
-            }
-        }
-
-        file_system.insert(proc_inode.0, VirtualEntry::Folder(proc_folder));
-        proc_inode.0
-    }
-
-    fn create_module_folder(
-        &self,
-        mut inode: INode,
-        process: &mut CachedWin32Process,
-        mod_info: &Win32ModuleInfo,
-        file_system: &mut HashMap<u64, VirtualEntry>,
-    ) -> u64 {
-        inode.set_id(0);
-
-        let module_inode = INode(inode.0);
-        let mut module_folder = VirtualFolder::new(&format!(
-            "{}_{}",
-            mod_info.base,
-            mod_info.name.replace(".", "_")
-        ));
-
-        // add all vmfs modules for the module scope
-        for ext in self.ext_modules.iter() {
-            // instantiate entry with a new id
-            if let Ok(fse) = ext.entry(&self.conn_id, process, &mod_info, &mut |fse| {
-                inode.set_id(inode.id() + 1);
-                file_system.insert(inode.0, fse);
-                inode.0
-            }) {
-                inode.set_id(inode.id() + 1);
-                file_system.insert(inode.0, fse);
-                module_folder.children.push(inode.0);
-            }
-        }
-
-        file_system.insert(module_inode.0, VirtualEntry::Folder(module_folder));
-        module_inode.0
-    }
-}
-
-impl Filesystem for VirtualMemoryFileSystem {
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        self.update_file_system();
-
-        if let Some(entry) = self.file_system.get(&(parent - 1)) {
-            info!(
-                "lookup(): found file system entry: {} {}",
-                parent - 1,
-                entry.name()
+            conn.refcount += 1;
+            state.file_systems.insert(
+                self.id.clone(),
+                FileSystemHandle::new(&self.id, &self.conn_id, &self.mount_point),
             );
+        }
+        Ok(())
+    }
 
-            match entry {
-                VirtualEntry::Folder(folder) => {
-                    // match child entries by name
-                    // TODO: maybe add a map?
-                    for child_inode in folder.children.clone().iter() {
-                        if let Some(child_entry) = self.file_system.get_mut(&child_inode) {
-                            // TODO: improve this check
-                            if child_entry.name() == name.to_string_lossy() {
-                                trace!(
-                                    "lookup(): found child entry: {} {}",
-                                    child_inode,
-                                    child_entry.name()
-                                );
-                                match child_entry {
-                                    VirtualEntry::Folder(_child_folder) => {
-                                        reply.entry(
-                                            &TTL,
-                                            &FileAttr {
-                                                ino: 1 + child_inode,
-                                                size: 0,
-                                                blocks: 0,
-                                                atime: UNIX_EPOCH,
-                                                mtime: UNIX_EPOCH,
-                                                ctime: UNIX_EPOCH,
-                                                crtime: UNIX_EPOCH,
-                                                kind: FileType::Directory,
-                                                perm: 0o755,
-                                                nlink: 2,
-                                                uid: self.uid,
-                                                gid: self.gid,
-                                                rdev: 0,
-                                                flags: 0,
-                                            },
-                                            0,
-                                        );
-                                    }
-                                    VirtualEntry::File(child_file) => {
-                                        reply.entry(
-                                            &TTL,
-                                            &FileAttr {
-                                                ino: 1 + child_inode,
-                                                size: child_file
-                                                    .data_source
-                                                    .content_length()
-                                                    .unwrap_or_default(),
-                                                blocks: 1, // TODO:
-                                                atime: UNIX_EPOCH,
-                                                mtime: UNIX_EPOCH,
-                                                ctime: UNIX_EPOCH,
-                                                crtime: UNIX_EPOCH,
-                                                kind: FileType::RegularFile,
-                                                perm: 0o644,
-                                                nlink: 1,
-                                                uid: self.uid,
-                                                gid: self.gid,
-                                                rdev: 0,
-                                                flags: 0,
-                                            },
-                                            0,
-                                        );
-                                    }
-                                }
+    /// Called on filesystem unmount.
+    fn destroy(&self, _req: RequestInfo) {
+        // Nothing.
+    }
 
-                                // early return, we found our entry
-                                return;
-                            }
-                        }
-                    }
-                }
-                VirtualEntry::File(_) => {
-                    // TODO: should not happen in readdir - print warn
-                    reply.error(ENOENT);
-                }
+    /// Get the attributes of a filesystem entry.
+    ///
+    /// * `fh`: a file handle if this is called on an open file.
+    fn getattr(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>) -> ResultEntry {
+        let ospath = path.iter().collect::<Vec<_>>();
+        if let Some(node) = self.find_node(ospath.as_slice()) {
+            let now = time::get_time();
+            if node.is_leaf() {
+                let perm = if self.readonly || !node.is_writable() {
+                    0o555
+                } else {
+                    0o755
+                };
+                Ok((
+                    TTL,
+                    FileAttr {
+                        size: node.size() as u64,
+                        blocks: 1, // TODO:
+                        atime: now,
+                        mtime: now,
+                        ctime: now,
+                        crtime: Timespec::new(0, 0),
+                        kind: FileType::RegularFile,
+                        perm,
+                        nlink: 0, // TODO: ?
+                        uid: self.uid,
+                        gid: self.gid,
+                        rdev: 0, // TODO:
+                        flags: 0,
+                    },
+                ))
+            } else {
+                Ok((
+                    TTL,
+                    FileAttr {
+                        size: 0,
+                        blocks: 0,
+                        atime: now,
+                        mtime: now,
+                        ctime: now,
+                        crtime: Timespec::new(0, 0),
+                        kind: FileType::Directory,
+                        perm: 0o555,
+                        nlink: 0, // TODO: ?
+                        uid: self.uid,
+                        gid: self.gid,
+                        rdev: 0, // TODO:
+                        flags: 0,
+                    },
+                ))
             }
         } else {
-            reply.error(ENOENT);
+            //Err(libc::ENOSYS)
+            Err(libc::ENOENT)
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-        self.update_file_system();
+    // The following operations in the FUSE C API are all one kernel call: setattr
+    // We split them out to match the C API's behavior.
 
-        if let Some(entry) = self.file_system.get_mut(&(ino - 1)) {
-            info!(
-                "getattr(): found file system entry: {} {}",
-                ino - 1,
-                entry.name()
-            );
-
-            match entry {
-                VirtualEntry::Folder(_folder) => {
-                    reply.attr(
-                        &TTL,
-                        &FileAttr {
-                            ino,
-                            size: 0,
-                            blocks: 0,
-                            atime: UNIX_EPOCH,
-                            mtime: UNIX_EPOCH,
-                            ctime: UNIX_EPOCH,
-                            crtime: UNIX_EPOCH,
-                            kind: FileType::Directory,
-                            perm: 0o755,
-                            nlink: 2,
-                            uid: self.uid,
-                            gid: self.gid,
-                            rdev: 0,
-                            flags: 0,
-                        },
-                    );
-                }
-                VirtualEntry::File(file) => {
-                    reply.attr(
-                        &TTL,
-                        &FileAttr {
-                            ino,
-                            size: file.data_source.content_length().unwrap_or_default(),
-                            blocks: 1, // TODO:
-                            atime: UNIX_EPOCH,
-                            mtime: UNIX_EPOCH,
-                            ctime: UNIX_EPOCH,
-                            crtime: UNIX_EPOCH,
-                            kind: FileType::RegularFile,
-                            perm: 0o644,
-                            nlink: 1,
-                            uid: self.uid,
-                            gid: self.gid,
-                            rdev: 0,
-                            flags: 0,
-                        },
-                    );
-                }
-            }
-        } else {
-            reply.error(ENOENT);
-        }
+    /// Change the mode of a filesystem entry.
+    ///
+    /// * `fh`: a file handle if this is called on an open file.
+    /// * `mode`: the mode to change the file to.
+    fn chmod(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, _mode: u32) -> ResultEmpty {
+        info!("chmod {:?}", path);
+        Err(libc::ENOSYS)
     }
 
-    fn read(
-        &mut self,
-        _req: &Request,
-        ino: u64,
-        _fh: u64,
-        offset: i64,
-        size: u32,
-        reply: ReplyData,
-    ) {
-        if let Some(entry) = self.file_system.get_mut(&(ino - 1)) {
-            info!(
-                "getattr(): found file system entry: {} {}",
-                ino - 1,
-                entry.name()
-            );
+    /// Change the owner UID and/or group GID of a filesystem entry.
+    ///
+    /// * `fh`: a file handle if this is called on an open file.
+    /// * `uid`: user ID to change the file's owner to. If `None`, leave the UID unchanged.
+    /// * `gid`: group ID to change the file's group to. If `None`, leave the GID unchanged.
+    fn chown(
+        &self,
+        _req: RequestInfo,
+        path: &Path,
+        _fh: Option<u64>,
+        _uid: Option<u32>,
+        _gid: Option<u32>,
+    ) -> ResultEmpty {
+        info!("chown {:?}", path);
+        Err(libc::ENOSYS)
+    }
 
-            match entry {
-                VirtualEntry::File(file) => {
-                    if let Ok(contents) = file.data_source.contents(offset, size) {
-                        reply.data(contents.as_slice());
+    /// Set the length of a file.
+    ///
+    /// * `fh`: a file handle if this is called on an open file.
+    /// * `size`: size in bytes to set as the file's length.
+    fn truncate(
+        &self,
+        _req: RequestInfo,
+        path: &Path,
+        _fh: Option<u64>,
+        _size: u64,
+    ) -> ResultEmpty {
+        info!("truncate {:?}", path);
+        Err(libc::ENOSYS)
+    }
+
+    /// Set timestamps of a filesystem entry.
+    ///
+    /// * `fh`: a file handle if this is called on an open file.
+    /// * `atime`: the time of last access.
+    /// * `mtime`: the time of last modification.
+    fn utimens(
+        &self,
+        _req: RequestInfo,
+        path: &Path,
+        _fh: Option<u64>,
+        _atime: Option<Timespec>,
+        _mtime: Option<Timespec>,
+    ) -> ResultEmpty {
+        info!("utimens {:?}", path);
+        Err(libc::ENOSYS)
+    }
+
+    /// Set timestamps of a filesystem entry (with extra options only used on MacOS).
+    #[allow(clippy::too_many_arguments)]
+    fn utimens_macos(
+        &self,
+        _req: RequestInfo,
+        path: &Path,
+        _fh: Option<u64>,
+        _crtime: Option<Timespec>,
+        _chgtime: Option<Timespec>,
+        _bkuptime: Option<Timespec>,
+        _flags: Option<u32>,
+    ) -> ResultEmpty {
+        info!("utimens_macos {:?}", path);
+        Err(libc::ENOSYS)
+    }
+
+    // END OF SETATTR FUNCTIONS
+
+    /// Read a symbolic link.
+    fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
+        info!("readlink {:?}", path);
+        Err(libc::ENOSYS)
+    }
+
+    /// Create a special file.
+    ///
+    /// * `parent`: path to the directory to make the entry under.
+    /// * `name`: name of the entry.
+    /// * `mode`: mode for the new entry.
+    /// * `rdev`: if mode has the bits `S_IFCHR` or `S_IFBLK` set, this is the major and minor numbers for the device file. Otherwise it should be ignored.
+    fn mknod(
+        &self,
+        _req: RequestInfo,
+        parent: &Path,
+        name: &OsStr,
+        _mode: u32,
+        _rdev: u32,
+    ) -> ResultEntry {
+        info!("mknod {:?} {:?}", parent, name);
+        Err(libc::ENOSYS)
+    }
+
+    /// Create a directory.
+    ///
+    /// * `parent`: path to the directory to make the directory under.
+    /// * `name`: name of the directory.
+    /// * `mode`: permissions for the new directory.
+    fn mkdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr, _mode: u32) -> ResultEntry {
+        info!("mkdir {:?} {:?}", parent, name);
+        Err(libc::ENOSYS)
+    }
+
+    /// Remove a file.
+    ///
+    /// * `parent`: path to the directory containing the file to delete.
+    /// * `name`: name of the file to delete.
+    fn unlink(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
+        info!("unlink {:?} {:?}", parent, name);
+        Err(libc::ENOSYS)
+    }
+
+    /// Remove a directory.
+    ///
+    /// * `parent`: path to the directory containing the directory to delete.
+    /// * `name`: name of the directory to delete.
+    fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
+        info!("rmdir {:?} {:?}", parent, name);
+        Err(libc::ENOSYS)
+    }
+
+    /// Create a symbolic link.
+    ///
+    /// * `parent`: path to the directory to make the link in.
+    /// * `name`: name of the symbolic link.
+    /// * `target`: path (may be relative or absolute) to the target of the link.
+    fn symlink(
+        &self,
+        _req: RequestInfo,
+        parent: &Path,
+        name: &OsStr,
+        target: &Path,
+    ) -> ResultEntry {
+        info!("symlink {:?} {:?} {:?}", parent, name, target);
+        Err(libc::ENOSYS)
+    }
+
+    /// Rename a filesystem entry.
+    ///
+    /// * `parent`: path to the directory containing the existing entry.
+    /// * `name`: name of the existing entry.
+    /// * `newparent`: path to the directory it should be renamed into (may be the same as `parent`).
+    /// * `newname`: name of the new entry.
+    fn rename(
+        &self,
+        _req: RequestInfo,
+        parent: &Path,
+        name: &OsStr,
+        newparent: &Path,
+        newname: &OsStr,
+    ) -> ResultEmpty {
+        info!(
+            "rename {:?} {:?} {:?} {:?}",
+            parent, name, newparent, newname
+        );
+        Err(libc::ENOSYS)
+    }
+
+    /// Create a hard link.
+    ///
+    /// * `path`: path to an existing file.
+    /// * `newparent`: path to the directory for the new link.
+    /// * `newname`: name for the new link.
+    fn link(
+        &self,
+        _req: RequestInfo,
+        path: &Path,
+        newparent: &Path,
+        newname: &OsStr,
+    ) -> ResultEntry {
+        info!("link {:?} {:?} {:?}", path, newparent, newname);
+        Err(libc::ENOSYS)
+    }
+
+    /// Open a file.
+    ///
+    /// * `path`: path to the file.
+    /// * `flags`: one of `O_RDONLY`, `O_WRONLY`, or `O_RDWR`, plus maybe additional flags.
+    ///
+    /// Return a tuple of (file handle, flags). The file handle will be passed to any subsequent
+    /// calls that operate on the file, and can be any value you choose, though it should allow
+    /// your filesystem to identify the file opened even without any path info.
+    fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
+        let ospath = path.iter().collect::<Vec<_>>();
+        if let Some(node) = self.find_node(ospath.as_slice()) {
+            if node.is_leaf() {
+                if let Ok(reader) = node.open() {
+                    if let Ok(mut opened_files) = self.opened_files.write() {
+                        let handle = opened_files.insert(reader);
+                        if !self.readonly && node.is_writable() {
+                            // return flags with requested flags
+                            Ok((handle, flags))
+                        } else {
+                            // remove write options from flags
+                            let masked_flags =
+                                flags & !libc::O_WRONLY as u32 & !libc::O_RDWR as u32;
+                            Ok((handle, masked_flags))
+                        }
                     } else {
-                        reply.data(&[]);
+                        Err(libc::EIO)
                     }
+                } else {
+                    Err(libc::EIO)
                 }
-                VirtualEntry::Folder(_folder) => {
-                    // should never happen
-                    reply.error(ENOENT);
-                }
+            } else {
+                // open called on a folder?
+                Err(libc::ENOENT)
             }
         } else {
-            reply.error(ENOENT);
+            Err(libc::ENOENT)
         }
     }
 
-    fn readdir(
-        &mut self,
-        _req: &Request,
-        ino: u64,
-        _fh: u64,
-        offset: i64,
-        mut reply: ReplyDirectory,
-    ) {
-        self.update_file_system();
-
-        if let Some(entry) = self.file_system.get(&(ino - 1)) {
-            info!(
-                "readdir(): found file system entry: {} {}",
-                ino - 1,
-                entry.name()
-            );
-
-            match entry {
-                VirtualEntry::Folder(folder) => {
-                    let mut entries = vec![
-                        (1, FileType::Directory, ".".to_string()),
-                        (1, FileType::Directory, "..".to_string()),
-                    ];
-
-                    // find each child entry and add them to the list
-                    for child_inode in folder.children.iter() {
-                        if let Some(child_entry) = self.file_system.get(&child_inode) {
-                            match child_entry {
-                                VirtualEntry::Folder(child_folder) => {
-                                    trace!(
-                                        "readdir(): adding child folder: {} {}",
-                                        child_inode,
-                                        child_folder.name
-                                    );
-                                    entries.push((
-                                        1 + child_inode,
-                                        FileType::Directory,
-                                        child_folder.name.clone(),
-                                    ));
-                                }
-                                VirtualEntry::File(child_file) => {
-                                    trace!(
-                                        "readdir(): adding child file: {} {}",
-                                        child_inode,
-                                        child_file.name
-                                    );
-                                    entries.push((
-                                        1 + child_inode,
-                                        FileType::RegularFile,
-                                        child_file.name.clone(),
-                                    ));
-                                }
-                            }
-                        }
-                    }
-
-                    // send entries to fuse
-                    for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
-                        // i + 1 means the index of the next entry
-                        reply.add(entry.0, (i + 1) as i64, entry.1, entry.2);
-                    }
-
-                    reply.ok();
+    /// Read from a file.
+    ///
+    /// Note that it is not an error for this call to request to read past the end of the file, and
+    /// you should only return data up to the end of the file (i.e. the number of bytes returned
+    /// will be fewer than requested; possibly even zero). Do not extend the file in this case.
+    ///
+    /// * `path`: path to the file.
+    /// * `fh`: file handle returned from the `open` call.
+    /// * `offset`: offset into the file to start reading.
+    /// * `size`: number of bytes to read.
+    /// * `callback`: a callback that must be invoked to return the result of the operation: either
+    ///    the result data as a slice, or an error code.
+    ///
+    /// Return the return value from the `callback` function.
+    fn read(
+        &self,
+        _req: RequestInfo,
+        _path: &Path,
+        fh: u64,
+        offset: u64,
+        size: u32,
+        callback: impl FnOnce(ResultSlice<'_>) -> CallbackResult,
+    ) -> CallbackResult {
+        if let Ok(opened_files) = self.opened_files.read() {
+            if let Some(file) = opened_files.get(fh) {
+                if let Ok(buf) = file.lock().unwrap().read(offset, size) {
+                    callback(Ok(buf.as_slice()))
+                } else {
+                    callback(Err(libc::EIO))
                 }
-                VirtualEntry::File(_) => {
-                    // TODO: should not happen in readdir - print warn
-                    reply.error(ENOENT);
-                }
+            } else {
+                callback(Err(libc::ENOENT))
             }
         } else {
-            reply.error(ENOENT);
+            callback(Err(libc::EIO))
         }
+    }
+
+    /// Write to a file.
+    ///
+    /// * `path`: path to the file.
+    /// * `fh`: file handle returned from the `open` call.
+    /// * `offset`: offset into the file to start writing.
+    /// * `data`: the data to write
+    /// * `flags`:
+    ///
+    /// Return the number of bytes written.
+    fn write(
+        &self,
+        _req: RequestInfo,
+        _path: &Path,
+        fh: u64,
+        offset: u64,
+        data: Vec<u8>,
+        _flags: u32,
+    ) -> ResultWrite {
+        // TODO: double check writability?
+        if !self.readonly {
+            if let Ok(opened_files) = self.opened_files.read() {
+                if let Some(file) = opened_files.get(fh) {
+                    if let Ok(bytes) = file.lock().unwrap().write(offset, data) {
+                        Ok(bytes as u32)
+                    } else {
+                        Err(libc::EIO)
+                    }
+                } else {
+                    // opened file
+                    Err(libc::ENOENT)
+                }
+            } else {
+                // lock guard
+                Err(libc::EIO)
+            }
+        } else {
+            // readonly
+            Err(libc::EIO)
+        }
+    }
+
+    /// Called each time a program calls `close` on an open file.
+    ///
+    /// Note that because file descriptors can be duplicated (by `dup`, `dup2`, `fork`) this may be
+    /// called multiple times for a given file handle. The main use of this function is if the
+    /// filesystem would like to return an error to the `close` call. Note that most programs
+    /// ignore the return value of `close`, though.
+    ///
+    /// * `path`: path to the file.
+    /// * `fh`: file handle returned from the `open` call.
+    /// * `lock_owner`: if the filesystem supports locking (`setlk`, `getlk`), remove all locks
+    ///   belonging to this lock owner.
+    fn flush(&self, _req: RequestInfo, path: &Path, _fh: u64, _lock_owner: u64) -> ResultEmpty {
+        info!("flush {:?}", path);
+        Err(libc::ENOSYS)
+    }
+
+    /// Called when an open file is closed.
+    ///
+    /// There will be one of these for each `open` call. After `release`, no more calls will be
+    /// made with the given file handle.
+    ///
+    /// * `path`: path to the file.
+    /// * `fh`: file handle returned from the `open` call.
+    /// * `flags`: the flags passed when the file was opened.
+    /// * `lock_owner`: if the filesystem supports locking (`setlk`, `getlk`), remove all locks
+    ///   belonging to this lock owner.
+    /// * `flush`: whether pending data must be flushed or not.
+    fn release(
+        &self,
+        _req: RequestInfo,
+        _path: &Path,
+        fh: u64,
+        _flags: u32,
+        _lock_owner: u64,
+        _flush: bool,
+    ) -> ResultEmpty {
+        if let Ok(mut opened_files) = self.opened_files.write() {
+            opened_files.remove(fh);
+            Ok(())
+        } else {
+            Err(libc::EIO)
+        }
+    }
+
+    /// Write out any pending changes of a file.
+    ///
+    /// When this returns, data should be written to persistent storage.
+    ///
+    /// * `path`: path to the file.
+    /// * `fh`: file handle returned from the `open` call.
+    /// * `datasync`: if `false`, also write metadata, otherwise just write file data.
+    fn fsync(&self, _req: RequestInfo, path: &Path, _fh: u64, _datasync: bool) -> ResultEmpty {
+        info!("fsync {:?}", path);
+        Err(libc::ENOSYS)
+    }
+
+    /// Open a directory.
+    ///
+    /// Analogous to the `opend` call.
+    ///
+    /// * `path`: path to the directory.
+    /// * `flags`: file access flags. Will contain `O_DIRECTORY` at least.
+    ///
+    /// Return a tuple of (file handle, flags). The file handle will be passed to any subsequent
+    /// calls that operate on the directory, and can be any value you choose, though it should
+    /// allow your filesystem to identify the directory opened even without any path info.
+    fn opendir(&self, _req: RequestInfo, _path: &Path, flags: u32) -> ResultOpen {
+        Ok((1, flags))
+    }
+
+    /// Get the entries of a directory.
+    ///
+    /// * `path`: path to the directory.
+    /// * `fh`: file handle returned from the `opendir` call.
+    ///
+    /// Return all the entries of the directory.
+    fn readdir(&self, _req: RequestInfo, path: &Path, _fh: u64) -> ResultReaddir {
+        let ospath = path.iter().collect::<Vec<_>>();
+        if let Some(node) = self.find_node(ospath.as_slice()) {
+            let mut result = Vec::new();
+            if let Some(children) = node.children() {
+                for child in (*children).iter() {
+                    result.push(DirectoryEntry {
+                        name: OsString::from(child.name()),
+                        kind: if child.is_leaf() {
+                            FileType::RegularFile
+                        } else {
+                            FileType::Directory
+                        },
+                    });
+                }
+            }
+            Ok(result)
+        } else {
+            Err(libc::ENOENT)
+        }
+    }
+
+    /// Close an open directory.
+    ///
+    /// This will be called exactly once for each `opendir` call.
+    ///
+    /// * `path`: path to the directory.
+    /// * `fh`: file handle returned from the `opendir` call.
+    /// * `flags`: the file access flags passed to the `opendir` call.
+    fn releasedir(&self, _req: RequestInfo, _path: &Path, _fh: u64, _flags: u32) -> ResultEmpty {
+        //info!("releasedir {:?}", path);
+        //Err(libc::ENOSYS)
+        Ok(())
+    }
+
+    /// Write out any pending changes to a directory.
+    ///
+    /// Analogous to the `fsync` call.
+    fn fsyncdir(&self, _req: RequestInfo, path: &Path, _fh: u64, _datasync: bool) -> ResultEmpty {
+        info!("fsyncdir {:?}", path);
+        Err(libc::ENOSYS)
+    }
+
+    /// Get filesystem statistics.
+    ///
+    /// * `path`: path to some folder in the filesystem.
+    ///
+    /// See the `Statfs` struct for more details.
+    fn statfs(&self, _req: RequestInfo, path: &Path) -> ResultStatfs {
+        info!("statfs {:?}", path);
+        Err(libc::ENOSYS)
+    }
+
+    /// Set a file extended attribute.
+    ///
+    /// * `path`: path to the file.
+    /// * `name`: attribute name.
+    /// * `value`: the data to set the value to.
+    /// * `flags`: can be either `XATTR_CREATE` or `XATTR_REPLACE`.
+    /// * `position`: offset into the attribute value to write data.
+    fn setxattr(
+        &self,
+        _req: RequestInfo,
+        path: &Path,
+        name: &OsStr,
+        _value: &[u8],
+        _flags: u32,
+        _position: u32,
+    ) -> ResultEmpty {
+        info!("setxattr {:?} {:?}", path, name);
+        Err(libc::ENOSYS)
+    }
+
+    /// Get a file extended attribute.
+    ///
+    /// * `path`: path to the file
+    /// * `name`: attribute name.
+    /// * `size`: the maximum number of bytes to read.
+    ///
+    /// If `size` is 0, return `Xattr::Size(n)` where `n` is the size of the attribute data.
+    /// Otherwise, return `Xattr::Data(data)` with the requested data.
+    fn getxattr(&self, _req: RequestInfo, path: &Path, name: &OsStr, _size: u32) -> ResultXattr {
+        info!("getxattr {:?} {:?}", path, name);
+        Err(libc::ENOSYS)
+    }
+
+    /// List extended attributes for a file.
+    ///
+    /// * `path`: path to the file.
+    /// * `size`: maximum number of bytes to return.
+    ///
+    /// If `size` is 0, return `Xattr::Size(n)` where `n` is the size required for the list of
+    /// attribute names.
+    /// Otherwise, return `Xattr::Data(data)` where `data` is all the null-terminated attribute
+    /// names.
+    fn listxattr(&self, _req: RequestInfo, path: &Path, _size: u32) -> ResultXattr {
+        info!("listxattr {:?}", path);
+        Err(libc::ENOSYS)
+    }
+
+    /// Remove an extended attribute for a file.
+    ///
+    /// * `path`: path to the file.
+    /// * `name`: name of the attribute to remove.
+    fn removexattr(&self, _req: RequestInfo, path: &Path, name: &OsStr) -> ResultEmpty {
+        info!("removexattr {:?} {:?}", path, name);
+        Err(libc::ENOSYS)
+    }
+
+    /// Check for access to a file.
+    ///
+    /// * `path`: path to the file.
+    /// * `mask`: mode bits to check for access to.
+    ///
+    /// Return `Ok(())` if all requested permissions are allowed, otherwise return `Err(EACCES)`
+    /// or other error code as appropriate (e.g. `ENOENT` if the file doesn't exist).
+    fn access(&self, _req: RequestInfo, path: &Path, _mask: u32) -> ResultEmpty {
+        info!("access {:?}", path);
+
+        // TODO: build path structure and lazily evaluate it
+
+        Err(libc::ENOSYS)
+    }
+
+    /// Create and open a new file.
+    ///
+    /// * `parent`: path to the directory to create the file in.
+    /// * `name`: name of the file to be created.
+    /// * `mode`: the mode to set on the new file.
+    /// * `flags`: flags like would be passed to `open`.
+    ///
+    /// Return a `CreatedEntry` (which contains the new file's attributes as well as a file handle
+    /// -- see documentation on `open` for more info on that).
+    fn create(
+        &self,
+        _req: RequestInfo,
+        parent: &Path,
+        name: &OsStr,
+        _mode: u32,
+        _flags: u32,
+    ) -> ResultCreate {
+        info!("create {:?} {:?}", parent, name);
+        Err(libc::ENOSYS)
+    }
+
+    // getlk
+
+    // setlk
+
+    // bmap
+
+    /// macOS only: Rename the volume.
+    ///
+    /// * `name`: new name for the volume
+    #[cfg(target_os = "macos")]
+    fn setvolname(&self, _req: RequestInfo, name: &OsStr) -> ResultEmpty {
+        info!("create {:?}", name);
+        Err(libc::ENOSYS)
+    }
+
+    // exchange (macOS only, undocumented)
+
+    /// macOS only: Query extended times (bkuptime and crtime).
+    ///
+    /// * `path`: path to the file to get the times for.
+    ///
+    /// Return an `XTimes` struct with the times, or other error code as appropriate.
+    #[cfg(target_os = "macos")]
+    fn getxtimes(&self, _req: RequestInfo, path: &Path) -> ResultXTimes {
+        info!("getxtimes {:?}", path);
+        Err(libc::ENOSYS)
     }
 }
 
-/// Spawns a new thread which will remove all information
-/// about the filesystem from the global STATE.
-///
-/// This drop is really just used in the case
-/// where the user umounted the filesystem manually.
+/// Drops the filesystem and removes it from the global state.
 impl Drop for VirtualMemoryFileSystem {
     fn drop(&mut self) {
-        let id = self.id.clone();
-        let conn_id = self.conn_id.clone();
+        // grab state and remove the reference
+        let mut state = state_lock_sync();
+        if state.file_systems.contains_key(&self.id) {
+            info!(
+                "closing virtual filesystem and removing reference from connection {}",
+                self.conn_id
+            );
 
-        std::thread::spawn(move || {
-            let mut state = state_lock_sync();
-            if state.file_systems.contains_key(&id) {
-                info!(
-                    "closing virtual filesystem and removing reference from connection {}",
-                    conn_id
-                );
-
-                if let Some(conn) = state.connection_mut(&conn_id) {
-                    conn.refcount -= 1;
-                }
-
-                state.file_systems.remove(&id);
+            if let Some(conn) = state.connection_mut(&self.conn_id) {
+                conn.refcount -= 1;
             }
-        });
+
+            state.file_systems.remove(&self.id);
+        }
     }
 }

@@ -3,7 +3,6 @@ use crate::error::{Error, Result};
 use std::collections::HashMap;
 use tokio::sync::{Mutex, MutexGuard};
 
-use fuse::BackgroundSession;
 use lazy_static::lazy_static;
 use uuid::Uuid;
 
@@ -33,9 +32,7 @@ pub struct State {
     pub connections: HashMap<String, OpenedConnection>,
     pub connection_aliases: HashMap<String, String>,
 
-    pub file_systems: HashMap<String, FileSystemHandle<'static>>,
-
-    pub processes: HashMap<String, OpenedProcess>,
+    pub file_systems: HashMap<String, FileSystemHandle>,
 }
 
 impl State {
@@ -45,8 +42,6 @@ impl State {
             connection_aliases: HashMap::new(),
 
             file_systems: HashMap::new(),
-
-            processes: HashMap::new(),
         }
     }
 
@@ -127,10 +122,16 @@ pub type CachedTranslate = CachedVirtualTranslate<DirectTranslate, TimedCacheVal
 
 pub type CachedWin32Kernel = memflow_win32::Kernel<CachedConnectorInstance, CachedTranslate>;
 
+/*
 pub type CachedWin32Process<'a> = memflow_win32::Win32Process<
     VirtualDMA<&'a mut CachedConnectorInstance, &'a mut CachedTranslate, Win32VirtualTranslate>,
 >;
+*/
+pub type CachedWin32Process = memflow_win32::Win32Process<
+    VirtualDMA<CachedConnectorInstance, CachedTranslate, Win32VirtualTranslate>,
+>;
 
+#[derive(Debug, Clone)]
 pub enum KernelHandle {
     Win32(CachedWin32Kernel),
 }
@@ -163,24 +164,23 @@ impl OpenedConnection {
     }
 }
 
-pub struct FileSystemHandle<'a> {
+pub struct FileSystemHandle {
     pub id: String,
     pub conn_id: String,
     pub mount_point: String,
-    pub session: BackgroundSession<'a>,
 }
 
-impl<'a> FileSystemHandle<'a> {
-    pub fn new(id: &str, conn_id: &str, mount_point: &str, session: BackgroundSession<'a>) -> Self {
+impl FileSystemHandle {
+    pub fn new(id: &str, conn_id: &str, mount_point: &str) -> Self {
         Self {
             id: id.to_string(),
             conn_id: conn_id.to_string(),
             mount_point: mount_point.to_string(),
-            session,
         }
     }
 }
 
+/*
 pub struct OpenedProcess {
     pub conn_id: String,
 }
@@ -193,3 +193,4 @@ impl OpenedProcess {
         }
     }
 }
+*/

@@ -83,16 +83,9 @@ async fn run_server(mut listener: UnixListener) -> Result<()> {
                                     .await
                                     .expect("failed to execute command")
                             }
-
                             request::Message::FuseListMounts => commands::fuse::ls(&mut serializer)
                                 .await
                                 .expect("failed to execute command"),
-
-                            request::Message::FuseUmount(msg) => {
-                                commands::fuse::umount(&mut serializer, msg)
-                                    .await
-                                    .expect("failed to execute command");
-                            }
 
                             request::Message::GDBAttach(msg) => {
                                 commands::gdb::attach(&mut serializer, msg)

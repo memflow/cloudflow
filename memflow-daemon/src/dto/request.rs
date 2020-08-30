@@ -9,7 +9,6 @@ pub enum Message {
     // TODO: make os specific
     FuseMount(FuseMount),
     FuseListMounts,
-    FuseUmount(FuseUmount),
 
     GDBAttach(GDBAttach),
     GDBList,
@@ -39,12 +38,6 @@ pub struct FuseMount {
     pub mount_point: String,
     pub uid: u32,
     pub gid: u32,
-}
-
-// TODO: make os specific
-#[derive(Serialize, Deserialize, Debug)]
-pub struct FuseUmount {
-    pub fuse_id: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

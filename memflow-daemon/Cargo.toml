@@ -26,7 +26,7 @@ time = "0.1"
 
 # TODO: only on linux
 # fuse
-fuse = { git = "https://github.com/zargony/fuse-rs" }
+fuse_mt = "0.5"
 libc = "0.2.51"
 bitfield = "0.13.2"
 pelite = { git = "https://github.com/ko1N/pelite", features = ["serde"] }

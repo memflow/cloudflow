@@ -88,6 +88,7 @@ pub async fn attach<S: Sink<response::Message> + Unpin>(
 pub async fn ls<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()> {
     let state = STATE.lock().await;
 
+    /*
     send_log_info(
         frame,
         &format!(
@@ -112,6 +113,7 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()>
 
         send_table(frame, table).await?;
     }
+    */
 
     send_ok(frame).await
 }
