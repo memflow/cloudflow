@@ -204,13 +204,20 @@ pub struct VirtualMemoryFileSystem {
 }
 
 impl VirtualMemoryFileSystem {
-    pub fn new(conn_id: &str, mount_point: &str, kernel: KernelHandle, uid: u32, gid: u32) -> Self {
+    pub fn new(
+        id: &str,
+        conn_id: &str,
+        mount_point: &str,
+        kernel: KernelHandle,
+        uid: u32,
+        gid: u32,
+    ) -> Self {
         let readonly = match &kernel {
             KernelHandle::Win32(kernel) => kernel.phys_mem.metadata().readonly,
         };
 
         Self {
-            id: new_uuid(),
+            id: id.to_string(),
             conn_id: conn_id.to_string(),
             mount_point: mount_point.to_string(),
 

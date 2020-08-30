@@ -80,14 +80,13 @@ impl FileSystemEntry for DriverRootFolder {
                     KernelHandle::Win32(kernel) => {
                         if let Ok(mut kernel_proc) = kernel.kernel_process() {
                             if let Ok(modules) = kernel_proc.module_list() {
-                                for module in modules.iter() {
-                                    /*
-                                    result.push(Box::new(TestFile::new(&format!(
-                                        "{:x}_{}",
-                                        module.base, module.name
-                                    )))
+                                for mi in modules.into_iter() {
+                                    result.push(Box::new(ModuleFolder::new(
+                                        self.kernel.clone(),
+                                        kernel_proc.proc_info.clone(),
+                                        mi,
+                                    ))
                                         as Box<dyn FileSystemEntry>);
-                                        */
                                 }
                             }
                         }

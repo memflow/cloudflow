@@ -5,7 +5,7 @@ use crate::dispatch::*;
 use crate::dto::request;
 use crate::error::{Error, Result};
 use crate::response;
-use crate::state::STATE;
+use crate::state::{new_uuid, STATE};
 
 use futures::Sink;
 use std::ffi::OsStr;
@@ -27,6 +27,19 @@ pub async fn mount<S: Sink<response::Message> + Unpin>(
         // find connection and spawn filesystem thread
         if let Some(conn) = state.connection_mut(&msg.conn_id) {
             let kernel = conn.kernel.clone();
+            let id = new_uuid();
+
+            send_log_info(
+                frame,
+                &format!("filesystem with id {} mounted at {}", id, &msg.mount_point),
+            )
+            .await?;
+            send_log_info(
+                frame,
+                "please use 'umount' or 'fusermount -u' to unmount the filesystem",
+            )
+            .await?;
+
             std::thread::spawn(move || {
                 let opts = [
                     "-o",
@@ -36,6 +49,7 @@ pub async fn mount<S: Sink<response::Message> + Unpin>(
 
                 // the filesystem will add itself into the global scope
                 let vmfs = VirtualMemoryFileSystem::new(
+                    &id,
                     &msg.conn_id,
                     &msg.mount_point,
                     kernel,
