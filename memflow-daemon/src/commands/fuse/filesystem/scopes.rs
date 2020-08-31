@@ -5,7 +5,7 @@ mod process;
 use process::ProcessInfoFile;
 
 mod module;
-use module::ModuleDumpFile;
+use module::{ModuleDumpFile, ModulePeFolder};
 
 use super::{ChildrenList, FileSystemChildren, FileSystemEntry};
 use crate::state::KernelHandle;
@@ -279,11 +279,18 @@ impl FileSystemEntry for ModuleFolder {
 
     fn children(&self) -> Option<ChildrenList> {
         Some(self.children.get_or_insert(|| {
-            vec![Box::new(ModuleDumpFile::new(
-                self.kernel.clone(),
-                self.pi.clone(),
-                self.mi.clone(),
-            ))]
+            vec![
+                Box::new(ModulePeFolder::new(
+                    self.kernel.clone(),
+                    self.pi.clone(),
+                    self.mi.clone(),
+                )),
+                Box::new(ModuleDumpFile::new(
+                    self.kernel.clone(),
+                    self.pi.clone(),
+                    self.mi.clone(),
+                )),
+            ]
         }))
     }
 }
