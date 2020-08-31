@@ -141,9 +141,38 @@ pub unsafe fn get_gid_by_name(name: &str) -> Option<libc::gid_t> {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     verbosity: Option<String>,
-    pid_file: String,
+    pid_file: Option<String>,
     log_file: Option<String>,
     socket_addr: String,
+}
+
+pub struct PidFile {
+    _fd: i32,
+}
+
+impl PidFile {
+    pub fn new(path: &str) -> Result<Self> {
+        let cpath = CString::new(path).map_err(|_| Error::Other("unable o convert path"))?;
+
+        let fd = unsafe {
+            let fd = libc::open(cpath.as_ptr(), libc::O_WRONLY | libc::O_CREAT, 0o666);
+            if fd == -1 {
+                return Err(Error::Other(
+                    "unable to open pidfile, is another daemon instance running?",
+                ));
+            }
+
+            if libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) == -1 {
+                return Err(Error::Other(
+                    "unable to lock pidfile, is another daemon instance running?",
+                ));
+            }
+
+            fd
+        };
+
+        Ok(Self { _fd: fd })
+    }
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -191,6 +220,14 @@ async fn main() -> Result<()> {
     } else {
         simple_logger::init_with_level(log_filter.to_level().unwrap()).unwrap();
     }
+
+    // instantiate pid file
+    let _pid_file = PidFile::new(
+        &config
+            .pid_file
+            .unwrap_or_else(|| "/var/run/memflow.pid".to_string()),
+    )
+    .unwrap();
 
     // setup the listening socket
     let url =
