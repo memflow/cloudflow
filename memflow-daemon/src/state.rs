@@ -33,6 +33,7 @@ pub struct State {
     pub connection_aliases: HashMap<String, String>,
 
     pub file_systems: HashMap<String, FileSystemHandle>,
+    pub gdb_stubs: HashMap<String, GdbStubHandle>,
 }
 
 impl State {
@@ -42,6 +43,7 @@ impl State {
             connection_aliases: HashMap::new(),
 
             file_systems: HashMap::new(),
+            gdb_stubs: HashMap::new(),
         }
     }
 
@@ -122,11 +124,6 @@ pub type CachedTranslate = CachedVirtualTranslate<DirectTranslate, TimedCacheVal
 
 pub type CachedWin32Kernel = memflow_win32::Kernel<CachedConnectorInstance, CachedTranslate>;
 
-/*
-pub type CachedWin32Process<'a> = memflow_win32::Win32Process<
-    VirtualDMA<&'a mut CachedConnectorInstance, &'a mut CachedTranslate, Win32VirtualTranslate>,
->;
-*/
 pub type CachedWin32Process = memflow_win32::Win32Process<
     VirtualDMA<CachedConnectorInstance, CachedTranslate, Win32VirtualTranslate>,
 >;
@@ -180,17 +177,18 @@ impl FileSystemHandle {
     }
 }
 
-/*
-pub struct OpenedProcess {
+pub struct GdbStubHandle {
+    pub id: String,
     pub conn_id: String,
+    pub addr: String,
 }
 
-impl OpenedProcess {
-    #[allow(unused)]
-    pub fn new(conn_id: &str) -> Self {
+impl GdbStubHandle {
+    pub fn new(id: &str, conn_id: &str, addr: &str) -> Self {
         Self {
+            id: id.to_string(),
             conn_id: conn_id.to_string(),
+            addr: addr.to_string(),
         }
     }
 }
-*/

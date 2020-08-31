@@ -1,5 +1,4 @@
 mod attach;
-mod detach;
 mod ls;
 
 use crate::Config;
@@ -15,7 +14,6 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
         .about("manages gdb stubs")
         .subcommand(attach::command_definition())
         .subcommand(ls::command_definition())
-        .subcommand(detach::command_definition())
 }
 
 pub fn handle_command(conf: &Config, matches: &ArgMatches) {
@@ -24,7 +22,6 @@ pub fn handle_command(conf: &Config, matches: &ArgMatches) {
     match matches.subcommand() {
         (attach::COMMAND_STR, Some(matches)) => attach::handle_command(conf, matches),
         (ls::COMMAND_STR, Some(matches)) => ls::handle_command(conf, matches),
-        (detach::COMMAND_STR, Some(matches)) => detach::handle_command(conf, matches),
         _ => ::std::process::exit(1),
     }
 }

@@ -16,5 +16,5 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
 pub fn handle_command(conf: &Config, _matches: &ArgMatches) {
     trace!("handling command");
 
-    dispatch_request(conf, request::Message::FuseListMounts).unwrap();
+    dispatch_request(conf, request::Message::GdbList).unwrap();
 }

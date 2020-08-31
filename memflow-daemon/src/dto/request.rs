@@ -10,9 +10,8 @@ pub enum Message {
     FuseMount(FuseMount),
     FuseListMounts,
 
-    GDBAttach(GDBAttach),
-    GDBList,
-    GDBDetach(GDBDetach),
+    GdbAttach(GDBAttach),
+    GdbList,
 
     ListProcesses(ListProcesses),
     OpenProcess(OpenProcess),
@@ -46,11 +45,6 @@ pub struct GDBAttach {
     pub pid: String,
     pub addr: String,
     // TODO: fetch file permissions for unix sockets
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct GDBDetach {
-    pub gdb_id: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

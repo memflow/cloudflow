@@ -95,13 +95,10 @@ async fn handle_message<S: Sink<response::Message> + Unpin>(
             .await
             .expect("failed to execute command"),
 
-        request::Message::GDBAttach(msg) => commands::gdb::attach(frame, msg)
+        request::Message::GdbAttach(msg) => commands::gdb::attach(frame, msg)
             .await
             .expect("failed to execute command"),
-        request::Message::GDBList => commands::gdb::ls(frame)
-            .await
-            .expect("failed to execute command"),
-        request::Message::GDBDetach(msg) => commands::gdb::detach(frame, msg)
+        request::Message::GdbList => commands::gdb::ls(frame)
             .await
             .expect("failed to execute command"),
         request::Message::ListProcesses(msg) => {

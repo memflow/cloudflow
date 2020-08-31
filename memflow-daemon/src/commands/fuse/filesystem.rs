@@ -210,7 +210,7 @@ impl FileHandles {
 }
 
 /// The Virtual Memory File System
-/// TODO: add more text
+/// The VMFS will add and remove itself from the global state.
 pub struct VirtualMemoryFileSystem {
     id: String,
     conn_id: String,
