@@ -79,7 +79,7 @@ impl FileSystemEntry for ProcessMemoryMaps {
                 l.borrow()
                     .as_ref()
                     .map(|s| s.len())
-                    .unwrap_or(size::gb(256))
+                    .unwrap_or_else(|| size::gb(256))
             })
             .unwrap_or_default()
     }
@@ -134,7 +134,6 @@ impl FileSystemEntry for ProcessMemoryMaps {
                                 paddr,
                                 module.map(|m| m.name.clone()).unwrap_or_default()
                             )
-                            .to_string()
                         })
                         .collect();
 
