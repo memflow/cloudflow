@@ -1,4 +1,5 @@
 use crate::dispatch::*;
+use crate::Config;
 
 use clap::{App, ArgMatches, SubCommand};
 
@@ -12,8 +13,8 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
     SubCommand::with_name(COMMAND_STR).about("lists all mounted file systems")
 }
 
-pub fn handle_command(_matches: &ArgMatches) {
+pub fn handle_command(conf: &Config, _matches: &ArgMatches) {
     trace!("handling command");
 
-    dispatch_request(request::Message::FuseListMounts).unwrap();
+    dispatch_request(conf, request::Message::FuseListMounts).unwrap();
 }

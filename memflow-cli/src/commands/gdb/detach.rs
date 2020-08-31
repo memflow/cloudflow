@@ -1,4 +1,5 @@
 use crate::dispatch::*;
+use crate::Config;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 
@@ -21,13 +22,16 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
         )
 }
 
-pub fn handle_command(matches: &ArgMatches) {
+pub fn handle_command(conf: &Config, matches: &ArgMatches) {
     trace!("handling command");
 
     let gdb_id = matches.value_of(GDB_ID).unwrap();
 
-    dispatch_request(request::Message::GDBDetach(request::GDBDetach {
-        gdb_id: gdb_id.to_string(),
-    }))
+    dispatch_request(
+        conf,
+        request::Message::GDBDetach(request::GDBDetach {
+            gdb_id: gdb_id.to_string(),
+        }),
+    )
     .unwrap();
 }

@@ -1,5 +1,7 @@
 mod ls;
 
+use crate::Config;
+
 use clap::{App, ArgMatches, SubCommand};
 
 use log::trace;
@@ -12,14 +14,11 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
         .subcommand(ls::command_definition())
 }
 
-pub fn handle_command(matches: &ArgMatches) {
+pub fn handle_command(conf: &Config, matches: &ArgMatches) {
     trace!("handling command");
 
     match matches.subcommand() {
-        (ls::COMMAND_STR, Some(matches)) => ls::handle_command(matches),
-        _ => {
-            //term.error(matches.usage()).unwrap();
-            ::std::process::exit(1)
-        }
+        (ls::COMMAND_STR, Some(matches)) => ls::handle_command(conf, matches),
+        _ => ::std::process::exit(1),
     }
 }

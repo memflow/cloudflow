@@ -2,7 +2,7 @@ mod scopes;
 use scopes::ConnectionScope;
 
 use crate::error::{Error, Result};
-use crate::state::{new_uuid, state_lock_sync, FileSystemHandle, KernelHandle};
+use crate::state::{state_lock_sync, FileSystemHandle, KernelHandle};
 
 use std::cell::RefCell;
 use std::ffi::{OsStr, OsString};

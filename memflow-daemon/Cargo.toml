@@ -7,8 +7,11 @@ edition = "2018"
 [dependencies]
 memflow-core = { path = "../../memflow/memflow-core" }
 memflow-win32 = { path = "../../memflow/memflow-win32", features = ["serde_derive"] }
+clap = { version = "2.33.0" }
 log = "0.4.8"
 simple_logger = "1.0.1"
+simple-logging = "2.0.2"
+url = "2.1"
 lazy_static = "1.4"
 uuid = { version = "0.8", features = ["v4"] }
 
@@ -33,4 +36,3 @@ pelite = { git = "https://github.com/ko1N/pelite", features = ["serde"] }
 
 # gdb
 gdbstub = "0.2"
-url = "2.1"

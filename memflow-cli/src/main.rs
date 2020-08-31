@@ -5,9 +5,13 @@ mod dispatch;
 
 #[macro_use]
 extern crate clap;
-use clap::App;
+use clap::{App, Arg};
 
 use log::Level;
+
+pub struct Config {
+    pub host: String,
+}
 
 fn main() {
     let matches = App::new(crate_name!())
@@ -16,33 +20,38 @@ fn main() {
         .author(crate_authors!())
         .about("memflow command line interface")
         .after_help(crate_description!())
+        .arg(
+            Arg::with_name("host")
+                .short("h")
+                .long("host")
+                .takes_value(true)
+                .required(false)
+                .default_value("unix:/var/run/memflow.sock"),
+        )
         .subcommand(commands::connection::command_definition())
         .subcommand(commands::fuse::command_definition())
         .subcommand(commands::proc::command_definition())
         .subcommand(commands::gdb::command_definition())
         .get_matches();
 
-    /*
-    match matches.occurrences_of("verbose") {
-        1 => simple_logger::init_with_level(Level::Warn).unwrap(),
-        2 => simple_logger::init_with_level(Level::Info).unwrap(),
-        3 => simple_logger::init_with_level(Level::Debug).unwrap(),
-        4 => simple_logger::init_with_level(Level::Trace).unwrap(),
-        _ => simple_logger::init_with_level(Level::Error).unwrap(),
-    }
-    */
     simple_logger::init_with_level(Level::Debug).unwrap();
+
+    let host = matches.value_of("host").unwrap().to_string();
+    let conf = Config { host };
 
     match matches.subcommand() {
         (commands::connection::COMMAND_STR, Some(subargv)) => {
-            commands::connection::handle_command(subargv)
+            commands::connection::handle_command(&conf, subargv)
         }
-        (commands::fuse::COMMAND_STR, Some(subargv)) => commands::fuse::handle_command(subargv),
-        (commands::proc::COMMAND_STR, Some(subargv)) => commands::proc::handle_command(subargv),
-        (commands::gdb::COMMAND_STR, Some(subargv)) => commands::gdb::handle_command(subargv),
-        _ => {
-            // term.error(matches.usage()).unwrap();
-            ::std::process::exit(1)
+        (commands::fuse::COMMAND_STR, Some(subargv)) => {
+            commands::fuse::handle_command(&conf, subargv)
         }
+        (commands::proc::COMMAND_STR, Some(subargv)) => {
+            commands::proc::handle_command(&conf, subargv)
+        }
+        (commands::gdb::COMMAND_STR, Some(subargv)) => {
+            commands::gdb::handle_command(&conf, subargv)
+        }
+        _ => ::std::process::exit(1),
     }
 }

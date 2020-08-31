@@ -1,4 +1,5 @@
 use crate::dispatch::*;
+use crate::Config;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 
@@ -21,13 +22,16 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
         )
 }
 
-pub fn handle_command(matches: &ArgMatches) {
+pub fn handle_command(conf: &Config, matches: &ArgMatches) {
     trace!("handling command");
 
     let conn_id = matches.value_of(CONNECTION_ID).unwrap();
 
-    dispatch_request(request::Message::ListProcesses(request::ListProcesses {
-        conn_id: conn_id.to_string(),
-    }))
+    dispatch_request(
+        conf,
+        request::Message::ListProcesses(request::ListProcesses {
+            conn_id: conn_id.to_string(),
+        }),
+    )
     .unwrap();
 }
