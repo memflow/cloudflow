@@ -1,6 +1,9 @@
 mod connection;
 use connection::PhysicalDumpFile;
 
+mod process;
+use process::ProcessInfoFile;
+
 mod module;
 use module::ModuleDumpFile;
 
@@ -178,10 +181,10 @@ impl FileSystemEntry for ProcessFolder {
 
     fn children(&self) -> Option<ChildrenList> {
         Some(self.children.get_or_insert(|| {
-            vec![Box::new(ModuleRootFolder::new(
-                self.kernel.clone(),
-                self.pi.clone(),
-            ))]
+            vec![
+                Box::new(ProcessInfoFile::new(&self.pi)),
+                Box::new(ModuleRootFolder::new(self.kernel.clone(), self.pi.clone())),
+            ]
         }))
     }
 }

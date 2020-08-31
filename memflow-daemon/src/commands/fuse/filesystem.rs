@@ -85,7 +85,7 @@ struct FileSystemChildren {
     last_refresh: RefCell<Instant>,
 }
 
-// TODO:
+// TODO: remove those
 unsafe impl Send for FileSystemChildren {}
 unsafe impl Sync for FileSystemChildren {}
 
@@ -148,13 +148,35 @@ pub trait FileSystemFileHandler {
     }
 }
 
+/// This reader provides a basic implementation of a `FileSystemFileHandler`.
+/// It will just return the contents being put into it when reading.
+struct StaticFileReader {
+    contents: String,
+}
+
+impl StaticFileReader {
+    pub fn new(contents: &str) -> Self {
+        Self {
+            contents: contents.to_string(),
+        }
+    }
+}
+
+impl FileSystemFileHandler for StaticFileReader {
+    fn read(&mut self, offset: u64, size: u32) -> Result<Vec<u8>> {
+        let contents = self.contents.as_bytes();
+        let end = std::cmp::min((offset + size as u64) as usize, contents.len());
+        Ok(contents[offset as usize..end].to_vec())
+    }
+}
+
 /// Helper struct that contains all current file handles
 struct FileHandles {
     file_handle: u64,
     handles: Vec<(u64, Arc<Mutex<Box<dyn FileSystemFileHandler>>>)>,
 }
 
-// TODO:
+// TODO: remove those
 unsafe impl Send for FileHandles {}
 unsafe impl Sync for FileHandles {}
 
