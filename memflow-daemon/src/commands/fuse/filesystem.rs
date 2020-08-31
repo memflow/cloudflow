@@ -157,13 +157,22 @@ impl StaticFileReader {
             contents: contents.to_string(),
         }
     }
+
+    pub fn from_string(contents: String) -> Self {
+        Self { contents }
+    }
 }
 
 impl FileSystemFileHandler for StaticFileReader {
     fn read(&mut self, offset: u64, size: u32) -> Result<Vec<u8>> {
         let contents = self.contents.as_bytes();
+
+        let start = std::cmp::min((offset + 1) as usize, contents.len())
+            .checked_sub(1)
+            .ok_or(Error::Other("Reading from empty buffer"))?;
         let end = std::cmp::min((offset + size as u64) as usize, contents.len());
-        Ok(contents[offset as usize..end].to_vec())
+
+        Ok(contents[start..end].to_vec())
     }
 }
 
