@@ -6,8 +6,10 @@ debug = true
 members = [
     "memflow-daemon",
     "memflow-cli",
+    "memflow-daemon-connector",
 ]
 default-members = [
     "memflow-daemon",
     "memflow-cli",
+    "memflow-daemon-connector",
 ]

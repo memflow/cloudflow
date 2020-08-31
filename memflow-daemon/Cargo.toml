@@ -5,7 +5,7 @@ authors = ["ko1N <ko1N1337@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-memflow-core = { path = "../../memflow/memflow-core" }
+memflow-core = { path = "../../memflow/memflow-core", features = ["serde_derive"] }
 memflow-win32 = { path = "../../memflow/memflow-win32", features = ["serde_derive"] }
 clap = { version = "2.33.0" }
 log = "0.4.8"

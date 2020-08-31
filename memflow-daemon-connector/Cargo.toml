@@ -1,0 +1,50 @@
+[package]
+name = "memflow-daemon-connector"
+version = "0.1.0"
+authors = ["ko1N <ko1N1337@gmail.com>"]
+edition = "2018"
+description = "daemon remote connector for the memflow physical memory introspection framework"
+homepage = "https://memflow.github.io"
+repository = "https://github.com/memflow/memflow-cli"
+readme = "README.md"
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[dependencies]
+#memflow-core = { git = "ssh://git@github.com/memflow/memflow.git", branch = "dev", features = ["inventory"] }
+#memflow-derive = { git = "ssh://git@github.com/memflow/memflow.git", branch = "dev" }
+#memflow-daemon = { git = "../memflow-daemon" }
+memflow-core = { path = "../../memflow/memflow-core/", features = ["inventory"] }
+memflow-derive = { path = "../../memflow/memflow-derive/" }
+memflow-daemon = { path = "../memflow-daemon" }
+log = { version = "0.4.8", default-features = false }
+url = "2.1"
+
+#tokio
+tokio = { version = "0.2.0", features = ["full"] }
+tokio-util = { version = "0.3.0", features = ["full"] }
+tokio-serde = "0.6"
+bytes = "0.5"
+futures = "0.3.0"
+http = "0.2"
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0"
+httparse = "1.0"
+time = "0.1"
+
+[dev-dependencies]
+clap = "2.33.0"
+simple_logger = "1.0.1"
+
+[profile.release]
+lto = true
+
+[features]
+default = []
+inventory = []
+
+[[example]]
+name = "read_phys"
+path = "examples/read_phys.rs"

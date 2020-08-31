@@ -71,6 +71,16 @@ pub async fn send_table<S: Sink<response::Message> + Unpin>(
         .map_err(|_| Error::IO)
 }
 
+pub async fn send_binary_data<S: Sink<response::Message> + Unpin>(
+    frame: &mut S,
+    data: Vec<u8>,
+) -> Result<()> {
+    frame
+        .send(response::Message::BinaryData(response::BinaryData { data }))
+        .await
+        .map_err(|_| Error::IO)
+}
+
 pub async fn send_ok<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()> {
     frame
         .send(response::Message::Result(response::CommandResult {

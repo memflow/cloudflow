@@ -87,6 +87,17 @@ async fn handle_message<S: Sink<response::Message> + Unpin>(
                 .expect("failed to execute command");
         }
 
+        request::Message::ReadPhysicalMemory(msg) => {
+            commands::phys_mem::read(frame, msg)
+                .await
+                .expect("failed to execute command");
+        }
+        request::Message::WritePhysicalMemory(msg) => {
+            commands::phys_mem::write(frame, msg)
+                .await
+                .expect("failed to execute command");
+        }
+
         // TODO: make os specific
         request::Message::FuseMount(msg) => commands::fuse::mount(frame, msg)
             .await

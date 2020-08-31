@@ -1,10 +1,15 @@
 use serde_derive::*;
 
+use memflow_core::Address;
+
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
     Connect(Connect),
     ListConnections,
     CloseConnection(CloseConnection),
+
+    ReadPhysicalMemory(ReadPhysicalMemory),
+    WritePhysicalMemory(WritePhysicalMemory),
 
     // TODO: make os specific
     FuseMount(FuseMount),
@@ -28,6 +33,20 @@ pub struct Connect {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CloseConnection {
     pub conn_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ReadPhysicalMemory {
+    pub conn_id: String,
+    pub addr: u64, // TODO: use Address here
+    pub len: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct WritePhysicalMemory {
+    pub conn_id: String,
+    pub address: u64,
+    pub data: Vec<u8>, // TODO: encode as base64?
 }
 
 // TODO: make os specific

@@ -15,6 +15,8 @@ use gdbstub::{
 
 use memflow_core::*;
 
+use pelite::pe64::*;
+
 fn wait_for_tcp(sockaddr: &str) -> Result<TcpStream> {
     info!("started tcp gdb stub on {:?}", sockaddr);
     let sock = TcpListener::bind(sockaddr).map_err(|e| {
@@ -145,6 +147,7 @@ pub fn spawn_gdb_stub(
 /// Implementation of the Virtual Memory GDB Stub
 pub struct GdbStubx64 {
     process: CachedWin32Process,
+    //eip: Address,
 }
 
 impl GdbStubx64 {
@@ -152,6 +155,18 @@ impl GdbStubx64 {
         match kernel {
             KernelHandle::Win32(kernel) => {
                 let process = kernel.into_process_pid(pid).map_err(Error::from)?;
+
+                // get first module
+
+                // get eip
+                /*
+                let image = process
+                    .virt_mem
+                    .virt_read_raw(mi.base, mi.size)
+                    .data_part()?;
+                let pe = PeView::from_bytes(&image).map_err(Error::PE)?;
+                */
+
                 Ok(Self { process })
             }
         }

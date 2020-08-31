@@ -5,6 +5,7 @@ pub enum Message {
     Log(Log),
     Table(Table),
     Result(CommandResult),
+    BinaryData(BinaryData),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -23,4 +24,9 @@ pub struct Table {
 pub struct CommandResult {
     pub success: bool,
     pub msg: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct BinaryData {
+    pub data: Vec<u8>, // TODO: encode as base64 ?
 }

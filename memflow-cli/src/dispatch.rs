@@ -39,7 +39,6 @@ async fn dispatch_async_tcp(addr: &str, req: request::Message) -> Result<()> {
     // TODO: setup timeouts
 
     let mut socket = TcpStream::connect(addr).await.map_err(|_| Error::IO)?;
-
     let (reader, writer) = socket.split();
 
     let framed_writer = FramedWrite::new(writer, LengthDelimitedCodec::new());
@@ -123,6 +122,9 @@ fn handle_message(msg: response::Message) -> bool {
             }
             // break loop
             return false;
+        }
+        _ => {
+            panic!("unhandled msg: {:?}", msg);
         }
     };
 
