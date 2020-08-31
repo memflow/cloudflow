@@ -13,7 +13,7 @@ use memflow_core::PID;
 
 pub async fn attach<S: Sink<response::Message> + Unpin>(
     frame: &mut S,
-    msg: request::GDBAttach,
+    msg: request::GdbAttach,
 ) -> Result<()> {
     let mut state = STATE.lock().await;
 

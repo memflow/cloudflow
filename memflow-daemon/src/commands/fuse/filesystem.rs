@@ -50,6 +50,7 @@ pub trait FileSystemEntry: Send + Sync {
 
 /// Extension trait for Boxed `FileSystemEntry` structures
 /// that enables recursive iteration over a path.
+#[allow(clippy::type_complexity)]
 trait FileSystemTraverse {
     fn traverse_children<'a>(
         &self,
@@ -57,6 +58,7 @@ trait FileSystemTraverse {
     ) -> (Option<Arc<Box<dyn FileSystemEntry>>>, &'a [&'a OsStr]);
 }
 
+#[allow(clippy::type_complexity)]
 impl<T: FileSystemEntry + ?Sized> FileSystemTraverse for Box<T> {
     fn traverse_children<'a>(
         &self,
@@ -126,12 +128,7 @@ impl FileSystemChildren {
             let mut last_refresh = self.last_refresh.borrow_mut();
 
             if children.is_none() || last_refresh.elapsed() > Duration::from_secs(5) {
-                children.replace(
-                    insert()
-                        .into_iter()
-                        .map(|f| Arc::new(f))
-                        .collect::<Vec<_>>(),
-                );
+                children.replace(insert().into_iter().map(Arc::new).collect::<Vec<_>>());
                 *last_refresh = Instant::now();
             }
         }
@@ -171,6 +168,7 @@ impl FileSystemFileHandler for StaticFileReader {
 }
 
 /// Helper struct that contains all current file handles
+#[allow(clippy::type_complexity)]
 struct FileHandles {
     file_handle: u64,
     handles: Vec<(u64, Arc<Mutex<Box<dyn FileSystemFileHandler>>>)>,

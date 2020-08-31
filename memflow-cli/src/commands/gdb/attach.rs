@@ -45,7 +45,7 @@ pub fn handle_command(conf: &Config, matches: &ArgMatches) {
 
     dispatch_request(
         conf,
-        request::Message::GdbAttach(request::GDBAttach {
+        request::Message::GdbAttach(request::GdbAttach {
             conn_id: conn_id.to_string(),
             pid: pid.to_string(),
             addr: addr.to_string(),

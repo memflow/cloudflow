@@ -180,7 +180,7 @@ impl ModulePeHeaderFile {
             .map_err(|_| Error::Other("unable to acquire kernel lock"))?;
         match &mut *kernel {
             KernelHandle::Win32(kernel) => {
-                let mut process = Win32Process::with_kernel_ref(kernel, pi.clone());
+                let mut process = Win32Process::with_kernel_ref(kernel, pi);
                 let image = process
                     .virt_mem
                     .virt_read_raw(mi.base, mi.size)
@@ -239,7 +239,7 @@ impl ModulePeImportsFile {
             .map_err(|_| Error::Other("unable to acquire kernel lock"))?;
         match &mut *kernel {
             KernelHandle::Win32(kernel) => {
-                let mut process = Win32Process::with_kernel_ref(kernel, pi.clone());
+                let mut process = Win32Process::with_kernel_ref(kernel, pi);
                 let image = process
                     .virt_mem
                     .virt_read_raw(mi.base, mi.size)
@@ -319,7 +319,7 @@ impl ModulePeExportsFile {
             .map_err(|_| Error::Other("unable to acquire kernel lock"))?;
         match &mut *kernel {
             KernelHandle::Win32(kernel) => {
-                let mut process = Win32Process::with_kernel_ref(kernel, pi.clone());
+                let mut process = Win32Process::with_kernel_ref(kernel, pi);
                 let image = process
                     .virt_mem
                     .virt_read_raw(mi.base, mi.size)

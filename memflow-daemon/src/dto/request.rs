@@ -1,6 +1,6 @@
 use serde_derive::*;
 
-use memflow_core::Address;
+use memflow_core::PhysicalAddress;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
@@ -10,12 +10,13 @@ pub enum Message {
 
     ReadPhysicalMemory(ReadPhysicalMemory),
     WritePhysicalMemory(WritePhysicalMemory),
+    PhysicalMemoryMetadata(PhysicalMemoryMetadata),
 
     // TODO: make os specific
     FuseMount(FuseMount),
     FuseListMounts,
 
-    GdbAttach(GDBAttach),
+    GdbAttach(GdbAttach),
     GdbList,
 
     ListProcesses(ListProcesses),
@@ -38,15 +39,21 @@ pub struct CloseConnection {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ReadPhysicalMemory {
     pub conn_id: String,
-    pub addr: u64, // TODO: use Address here
+    pub addr: PhysicalAddress,
     pub len: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct WritePhysicalMemory {
     pub conn_id: String,
-    pub address: u64,
-    pub data: Vec<u8>, // TODO: encode as base64?
+    pub addr: PhysicalAddress,
+    #[serde(with = "serde_bytes")]
+    pub data: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PhysicalMemoryMetadata {
+    pub conn_id: String,
 }
 
 // TODO: make os specific
@@ -59,7 +66,7 @@ pub struct FuseMount {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct GDBAttach {
+pub struct GdbAttach {
     pub conn_id: String,
     pub pid: String,
     pub addr: String,

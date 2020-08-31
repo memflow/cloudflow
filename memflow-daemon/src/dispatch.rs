@@ -81,6 +81,18 @@ pub async fn send_binary_data<S: Sink<response::Message> + Unpin>(
         .map_err(|_| Error::IO)
 }
 
+pub async fn send_phys_mem_metadata<S: Sink<response::Message> + Unpin>(
+    frame: &mut S,
+    metadata: memflow_core::PhysicalMemoryMetadata,
+) -> Result<()> {
+    frame
+        .send(response::Message::PhysicalMemoryMetadata(
+            response::PhysicalMemoryMetadata { metadata },
+        ))
+        .await
+        .map_err(|_| Error::IO)
+}
+
 pub async fn send_ok<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()> {
     frame
         .send(response::Message::Result(response::CommandResult {

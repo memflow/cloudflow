@@ -26,11 +26,11 @@ async fn dispatch_async(conf: &Config, req: request::Message) -> Result<()> {
                 dispatch_async_tcp(&format!("{}:{}", host_str, url.port().unwrap_or(8000)), req)
                     .await
             } else {
-                return Err(Error::Other("invalid tcp host address"));
+                Err(Error::Other("invalid tcp host address"))
             }
         }
         "unix" => dispatch_async_uds(url.path(), req).await,
-        _ => return Err(Error::Other("only tcp and unix urls are supported")),
+        _ => Err(Error::Other("only tcp and unix urls are supported")),
     }
 }
 

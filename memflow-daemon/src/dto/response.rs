@@ -2,10 +2,16 @@ use serde_derive::*;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
+    /// Message that contains a log message
     Log(Log),
+    /// Message that contains a table
     Table(Table),
-    Result(CommandResult),
+    /// Message that contains binary data
     BinaryData(BinaryData),
+    /// Message that contains physical memory metadata
+    PhysicalMemoryMetadata(PhysicalMemoryMetadata),
+    /// Message that contains a result
+    Result(CommandResult),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -21,12 +27,18 @@ pub struct Table {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
-pub struct CommandResult {
-    pub success: bool,
-    pub msg: String,
+pub struct BinaryData {
+    #[serde(with = "serde_bytes")]
+    pub data: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PhysicalMemoryMetadata {
+    pub metadata: memflow_core::PhysicalMemoryMetadata,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
-pub struct BinaryData {
-    pub data: Vec<u8>, // TODO: encode as base64 ?
+pub struct CommandResult {
+    pub success: bool,
+    pub msg: String,
 }

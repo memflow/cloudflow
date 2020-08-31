@@ -50,8 +50,10 @@ async fn run_server_tcp(addr: &str) -> Result<()> {
                     );
 
                     // currently a client is only supposed to send a single request
-                    while let Some(msg) = deserializer.try_next().await.unwrap() {
-                        handle_message(&mut serializer, msg).await.ok();
+                    while let Ok(msg_opt) = deserializer.try_next().await {
+                        if let Some(msg) = msg_opt {
+                            handle_message(&mut serializer, msg).await.ok();
+                        }
                     }
                 });
             }
@@ -97,6 +99,11 @@ async fn handle_message<S: Sink<response::Message> + Unpin>(
                 .await
                 .expect("failed to execute command");
         }
+        request::Message::PhysicalMemoryMetadata(msg) => {
+            commands::phys_mem::metadata(frame, msg)
+                .await
+                .expect("failed to execute command");
+        }
 
         // TODO: make os specific
         request::Message::FuseMount(msg) => commands::fuse::mount(frame, msg)
@@ -134,7 +141,7 @@ use std::os::unix::fs::PermissionsExt;
 const CONFIG_FILE: &str = "/etc/memflow/daemon.conf";
 
 #[cfg(not(target_os = "windows"))]
-pub unsafe fn get_gid_by_name(name: &str) -> Option<libc::gid_t> {
+unsafe fn get_gid_by_name(name: &str) -> Option<libc::gid_t> {
     let namestr = CString::new(name).ok()?;
     let ptr = getgrnam(namestr.as_ptr() as *const libc::c_char);
     if ptr.is_null() {

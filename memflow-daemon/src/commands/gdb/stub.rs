@@ -15,8 +15,6 @@ use gdbstub::{
 
 use memflow_core::*;
 
-use pelite::pe64::*;
-
 fn wait_for_tcp(sockaddr: &str) -> Result<TcpStream> {
     info!("started tcp gdb stub on {:?}", sockaddr);
     let sock = TcpListener::bind(sockaddr).map_err(|e| {

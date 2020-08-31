@@ -22,8 +22,8 @@ log = { version = "0.4.8", default-features = false }
 url = "2.1"
 
 #tokio
-tokio = { version = "0.2.0", features = ["full"] }
-tokio-util = { version = "0.3.0", features = ["full"] }
+tokio = { version = "0.2", features = ["full"] }
+tokio-util = { version = "0.3", features = ["full"] }
 tokio-serde = "0.6"
 bytes = "0.5"
 futures = "0.3.0"
@@ -37,9 +37,6 @@ time = "0.1"
 [dev-dependencies]
 clap = "2.33.0"
 simple_logger = "1.0.1"
-
-[profile.release]
-lto = true
 
 [features]
 default = []
