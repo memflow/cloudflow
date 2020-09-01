@@ -2,12 +2,17 @@
 [profile.bench]
 debug = true
 
+[profile.release]
+lto = true
+
 [workspace]
 members = [
     "memflow-daemon",
     "memflow-cli",
+    "memflow-daemon-connector",
 ]
 default-members = [
     "memflow-daemon",
     "memflow-cli",
+    "memflow-daemon-connector",
 ]

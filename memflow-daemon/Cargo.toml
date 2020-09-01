@@ -3,29 +3,44 @@ name = "memflow-daemon"
 version = "0.1.0"
 authors = ["ko1N <ko1N1337@gmail.com>"]
 edition = "2018"
+license = "MIT"
+description = "memflow daemon service"
+homepage = "https://memflow.github.io"
+repository = "https://github.com/memflow/memflow-cli"
+readme = "README.md"
+keywords = [ "memflow", "introspection", "memory" ]
+categories = [ "api-bindings", "memory-management", "os" ]
 
 [dependencies]
-memflow-core = { path = "../../memflow/memflow-core" }
-memflow-win32 = { path = "../../memflow/memflow-win32" }
+memflow = { version = "0.1", git = "https://github.com/memflow/memflow", branch = "master", features = ["inventory", "serde_derive"] }
+memflow-win32 = { version = "0.1", git = "https://github.com/memflow/memflow", branch = "master", features = ["serde_derive"] }
+clap = { version = "2.33.0" }
 log = "0.4.8"
 simple_logger = "1.0.1"
+simple-logging = "2.0.2"
+url = "2.1"
 lazy_static = "1.4"
 uuid = { version = "0.8", features = ["v4"] }
 
 # tokio
-tokio = { version = "0.2.0", features = ["full"] }
-tokio-util = { version = "0.3.0", features = ["full"] }
+tokio = { version = "0.2", features = ["full"] }
+tokio-util = { version = "0.3", features = ["full"] }
 tokio-serde = { version = "0.6", features = ["json"] }
 futures = "0.3.0"
 http = "0.2"
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
+serde_bytes = "0.11"
 httparse = "1.0"
 time = "0.1"
 
 # TODO: only on linux
 # fuse
-fuse = { git = "https://github.com/zargony/fuse-rs" }
+fuse_mt = "0.5"
 libc = "0.2.51"
 bitfield = "0.13.2"
+pelite = { version = "0.8", git = "https://github.com/h33p/pelite", branch = "wrap", features = ["serde"] }
+
+# gdb
+gdbstub = "0.2"

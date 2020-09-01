@@ -12,7 +12,7 @@ elif [[ "$PCMD" =~ "cargo bench" ]]; then
 	exec $@
 else
 	if [[ $RNAME =~ "memflow-daemon" ]]; then
-		exec sudo $@
+		exec sudo PATH=$PATH $@
 	else
 		exec $@
 	fi

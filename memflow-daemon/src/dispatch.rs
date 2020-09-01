@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use crate::dto::response;
 use crate::error::{Error, Result};
 
@@ -65,6 +67,28 @@ pub async fn send_table<S: Sink<response::Message> + Unpin>(
 ) -> Result<()> {
     frame
         .send(response::Message::Table(table))
+        .await
+        .map_err(|_| Error::IO)
+}
+
+pub async fn send_binary_data<S: Sink<response::Message> + Unpin>(
+    frame: &mut S,
+    data: Vec<u8>,
+) -> Result<()> {
+    frame
+        .send(response::Message::BinaryData(response::BinaryData { data }))
+        .await
+        .map_err(|_| Error::IO)
+}
+
+pub async fn send_phys_mem_metadata<S: Sink<response::Message> + Unpin>(
+    frame: &mut S,
+    metadata: memflow::PhysicalMemoryMetadata,
+) -> Result<()> {
+    frame
+        .send(response::Message::PhysicalMemoryMetadata(
+            response::PhysicalMemoryMetadata { metadata },
+        ))
         .await
         .map_err(|_| Error::IO)
 }

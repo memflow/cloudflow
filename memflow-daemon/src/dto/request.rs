@@ -1,15 +1,23 @@
 use serde_derive::*;
 
+use memflow::PhysicalAddress;
+
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
     Connect(Connect),
     ListConnections,
     CloseConnection(CloseConnection),
 
+    ReadPhysicalMemory(ReadPhysicalMemory),
+    WritePhysicalMemory(WritePhysicalMemory),
+    PhysicalMemoryMetadata(PhysicalMemoryMetadata),
+
     // TODO: make os specific
     FuseMount(FuseMount),
     FuseListMounts,
-    FuseUmount(FuseUmount),
+
+    GdbAttach(GdbAttach),
+    GdbList,
 
     ListProcesses(ListProcesses),
     OpenProcess(OpenProcess),
@@ -28,6 +36,26 @@ pub struct CloseConnection {
     pub conn_id: String,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ReadPhysicalMemory {
+    pub conn_id: String,
+    pub addr: PhysicalAddress,
+    pub len: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct WritePhysicalMemory {
+    pub conn_id: String,
+    pub addr: PhysicalAddress,
+    #[serde(with = "serde_bytes")]
+    pub data: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PhysicalMemoryMetadata {
+    pub conn_id: String,
+}
+
 // TODO: make os specific
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FuseMount {
@@ -37,10 +65,12 @@ pub struct FuseMount {
     pub gid: u32,
 }
 
-// TODO: make os specific
 #[derive(Serialize, Deserialize, Debug)]
-pub struct FuseUmount {
-    pub fuse_id: String,
+pub struct GdbAttach {
+    pub conn_id: String,
+    pub pid: String,
+    pub addr: String,
+    // TODO: fetch file permissions for unix sockets
 }
 
 #[derive(Serialize, Deserialize, Debug)]

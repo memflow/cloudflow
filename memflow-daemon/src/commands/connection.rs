@@ -7,18 +7,17 @@ use crate::state::{KernelHandle, STATE};
 use futures::Sink;
 use std::marker::Unpin;
 
-use memflow_core::*;
+use memflow::*;
 
 fn create_connector(msg: &request::Connect) -> Result<ConnectorInstance> {
     let args = match &msg.args {
-        Some(a) => ConnectorArgs::try_parse_str(a)
+        Some(a) => ConnectorArgs::parse(a)
             .map_err(|_| Error::Connector("unable to parse connector string"))?,
         None => ConnectorArgs::default(),
     };
 
-    let inventory = unsafe { ConnectorInventory::try_new() }.unwrap();
-    unsafe { inventory.create_connector(&msg.name, &args) }
-        .map_err(|_| Error::Connector("unable to create connector"))
+    let inventory = unsafe { ConnectorInventory::try_new() }.map_err(Error::from)?;
+    unsafe { inventory.create_connector(&msg.name, &args) }.map_err(Error::from)
 }
 
 pub async fn new<S: Sink<response::Message> + Unpin>(

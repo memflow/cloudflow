@@ -1,4 +1,5 @@
 use crate::dispatch::*;
+use crate::Config;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 
@@ -29,7 +30,7 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
         )
 }
 
-pub fn handle_command(matches: &ArgMatches) {
+pub fn handle_command(conf: &Config, matches: &ArgMatches) {
     trace!("handling command");
 
     let conn_id = matches.value_of(CONNECTION_ID).unwrap();
@@ -39,11 +40,14 @@ pub fn handle_command(matches: &ArgMatches) {
     let canonical_path = fs::canonicalize(mount_point).unwrap();
     let full_path = canonical_path.to_str().unwrap();
 
-    dispatch_request(request::Message::FuseMount(request::FuseMount {
-        conn_id: conn_id.to_string(),
-        mount_point: full_path.to_string(),
-        uid: unsafe { libc::getuid() },
-        gid: unsafe { libc::getgid() },
-    }))
+    dispatch_request(
+        conf,
+        request::Message::FuseMount(request::FuseMount {
+            conn_id: conn_id.to_string(),
+            mount_point: full_path.to_string(),
+            uid: unsafe { libc::getuid() },
+            gid: unsafe { libc::getgid() },
+        }),
+    )
     .unwrap();
 }

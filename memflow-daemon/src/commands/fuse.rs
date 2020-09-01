@@ -3,14 +3,14 @@ use filesystem::VirtualMemoryFileSystem;
 
 use crate::dispatch::*;
 use crate::dto::request;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::response;
-use crate::state::{new_uuid, state_lock_sync, FileSystemHandle, STATE};
+use crate::state::{new_uuid, STATE};
 
 use futures::Sink;
-use std::marker::Unpin;
-
 use std::ffi::OsStr;
+use std::marker::Unpin;
+use std::path::Path;
 
 pub async fn mount<S: Sink<response::Message> + Unpin>(
     frame: &mut S,
@@ -18,49 +18,61 @@ pub async fn mount<S: Sink<response::Message> + Unpin>(
 ) -> Result<()> {
     let mut state = STATE.lock().await;
 
-    // TODO:
-    // - mount point should be optional -> also check if dir exists and create the dir
-    // - if the dir was created just rm it here again (if its empty + umounted)
-    // fallback for the mountpath should be PWD + "./alias or id"
+    let is_empty = Path::new(&msg.mount_point)
+        .read_dir()
+        .map_err(|_| Error::Other("mount point not found"))?
+        .next()
+        .is_none();
+    if is_empty {
+        // find connection and spawn filesystem thread
+        if let Some(conn) = state.connection_mut(&msg.conn_id) {
+            let kernel = conn.kernel.clone();
+            let id = new_uuid();
 
-    // check if connection is valid and increase ref count
-    if let Some(conn) = state.connection_mut(&msg.conn_id) {
-        conn.refcount += 1;
+            send_log_info(
+                frame,
+                &format!("filesystem with id {} mounted at {}", id, &msg.mount_point),
+            )
+            .await?;
+            send_log_info(
+                frame,
+                "please use 'umount' or 'fusermount -u' to unmount the filesystem",
+            )
+            .await?;
 
-        // spawn a thread to move this out of the async runtime
-        std::thread::spawn(move || {
-            println!("uid={} gid={}", msg.uid, msg.gid);
+            std::thread::spawn(move || {
+                let opts = [
+                    "-o",
+                    &format!("auto_unmount,allow_other,uid={},gid={}", msg.uid, msg.gid),
+                ];
+                let mntopts = opts.iter().map(|o| o.as_ref()).collect::<Vec<&OsStr>>();
 
-            let opts = [
-                "-o",
-                "ro",
-                "-o",
-                &format!("fsname=hello,allow_other,uid={},gid={}", msg.uid, msg.gid),
-            ];
-            let mntopts = opts.iter().map(|o| o.as_ref()).collect::<Vec<&OsStr>>();
+                // the filesystem will add itself into the global scope
+                let vmfs = VirtualMemoryFileSystem::new(
+                    &id,
+                    &msg.conn_id,
+                    &msg.mount_point,
+                    kernel,
+                    msg.uid,
+                    msg.gid,
+                );
 
-            // TODO: chmod?
-            let fuse_id = new_uuid();
-            let vmfs = VirtualMemoryFileSystem::new(&fuse_id, &msg.conn_id, msg.uid, msg.gid);
+                // blocks until the fs is umounted
+                fuse_mt::mount(fuse_mt::FuseMT::new(vmfs, 8), &msg.mount_point, &mntopts).unwrap();
+            });
 
-            // TODO: use fuse::spawn_mount to have a convenient umoutn command in memflow?
-            // blocks until the fs is umount-ed
-            let file_system =
-                unsafe { fuse::spawn_mount(vmfs, msg.mount_point.clone(), &mntopts) }.unwrap();
-
-            // grab state and add the new file_system
-            let mut state = state_lock_sync();
-            state.file_systems.insert(
-                fuse_id.clone(),
-                FileSystemHandle::new(&fuse_id, &msg.conn_id, &msg.mount_point, file_system),
-            );
-        });
-
-        send_ok(frame).await
+            send_ok(frame).await
+        } else {
+            send_err(
+                frame,
+                &format!("no connection with id {} found", msg.conn_id),
+            )
+            .await
+        }
     } else {
-        send_log_error(
+        send_err(
             frame,
-            &format!("no connection with id {} found", msg.conn_id),
+            &format!("mount point {} is not empty", msg.mount_point),
         )
         .await
     }
@@ -95,25 +107,4 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()>
     }
 
     send_ok(frame).await
-}
-
-pub async fn umount<S: Sink<response::Message> + Unpin>(
-    frame: &mut S,
-    msg: request::FuseUmount,
-) -> Result<()> {
-    let mut state = STATE.lock().await;
-
-    if state.file_systems.contains_key(&msg.fuse_id) {
-        state.file_systems.remove(&msg.fuse_id);
-        send_ok(frame).await
-    } else {
-        send_err(
-            frame,
-            &format!(
-                "unable to remove file system {}: file system not found",
-                msg.fuse_id
-            ),
-        )
-        .await
-    }
 }

@@ -22,14 +22,47 @@ pub enum Error {
     ///
     /// Catch-all for socket write errors.
     SocketWrite,
+    /// GDB stub error
+    ///
+    /// Catch-all for gdb stub errors
+    GDB,
     /// Connector error
     Connector(&'static str),
+    /// memflow core error
+    Core(memflow::error::Error),
+    /// memflow win32 error
+    Win32(memflow_win32::error::Error),
+    /// PE error.
+    ///
+    /// Catch-all for pe related errors.
+    PE(pelite::Error),
 }
 
 /// Convert from &str to error
 impl convert::From<&'static str> for Error {
     fn from(error: &'static str) -> Self {
         Error::Other(error)
+    }
+}
+
+/// Convert from memflow::error::Error to error
+impl convert::From<memflow::error::Error> for Error {
+    fn from(error: memflow::error::Error) -> Self {
+        Error::Core(error)
+    }
+}
+
+/// Convert from memflow_win32::error::Error to error
+impl convert::From<memflow_win32::error::Error> for Error {
+    fn from(error: memflow_win32::error::Error) -> Self {
+        Error::Win32(error)
+    }
+}
+
+/// Convert from pelite::Error
+impl From<pelite::Error> for Error {
+    fn from(error: pelite::Error) -> Error {
+        Error::PE(error)
     }
 }
 
@@ -43,7 +76,11 @@ impl Error {
             Error::Deserialize => ("deserialization error", None),
             Error::SocketRead => ("socket read error", None),
             Error::SocketWrite => ("socket write error", None),
+            Error::GDB => ("gdb stub error", None),
             Error::Connector(e) => ("connector error", Some(e)),
+            Error::Core(e) => ("memflow core error", Some(e.to_str())),
+            Error::Win32(e) => ("memflow win32 error", Some(e.to_str())),
+            Error::PE(e) => ("error handling pe", Some(e.to_str())),
         }
     }
 

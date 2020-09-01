@@ -44,8 +44,8 @@ pub async fn ls<S: Sink<response::Message> + Unpin>(
                             process.name.clone(),
                             process.proc_arch.bits().to_string(),
                             format!("0x{:X}", process.dtb),
-                            format!("0x{:X}", process.teb),
-                            format!("0x{:X}", process.peb),
+                            format!("0x{:X}", process.teb.unwrap_or_default()),
+                            format!("0x{:X}", process.peb()),
                         ]);
                     }
 

@@ -1,11 +1,13 @@
+use crate::error::{Error, Result};
+
 use std::collections::HashMap;
 use tokio::sync::{Mutex, MutexGuard};
 
-use fuse::BackgroundSession;
 use lazy_static::lazy_static;
 use uuid::Uuid;
 
-use memflow_core::*;
+use memflow::*;
+use memflow_win32::*;
 
 lazy_static! {
     pub static ref STATE: Mutex<State> = Mutex::new(State::new());
@@ -30,9 +32,8 @@ pub struct State {
     pub connections: HashMap<String, OpenedConnection>,
     pub connection_aliases: HashMap<String, String>,
 
-    pub file_systems: HashMap<String, FileSystemHandle<'static>>,
-
-    pub processes: HashMap<String, OpenedProcess>,
+    pub file_systems: HashMap<String, FileSystemHandle>,
+    pub gdb_stubs: HashMap<String, GdbStubHandle>,
 }
 
 impl State {
@@ -42,8 +43,7 @@ impl State {
             connection_aliases: HashMap::new(),
 
             file_systems: HashMap::new(),
-
-            processes: HashMap::new(),
+            gdb_stubs: HashMap::new(),
         }
     }
 
@@ -117,11 +117,18 @@ impl State {
     }
 }
 
-pub type CachedWin32Kernel = memflow_win32::Kernel<
-    CachedMemoryAccess<'static, ConnectorInstance, TimedCacheValidator>,
-    CachedVirtualTranslate<DirectTranslate, TimedCacheValidator>,
+pub type CachedConnectorInstance =
+    CachedMemoryAccess<'static, ConnectorInstance, TimedCacheValidator>;
+
+pub type CachedTranslate = CachedVirtualTranslate<DirectTranslate, TimedCacheValidator>;
+
+pub type CachedWin32Kernel = memflow_win32::Kernel<CachedConnectorInstance, CachedTranslate>;
+
+pub type CachedWin32Process = memflow_win32::Win32Process<
+    VirtualDMA<CachedConnectorInstance, CachedTranslate, Win32VirtualTranslate>,
 >;
 
+#[derive(Debug, Clone)]
 pub enum KernelHandle {
     Win32(CachedWin32Kernel),
 }
@@ -154,32 +161,34 @@ impl OpenedConnection {
     }
 }
 
-pub struct FileSystemHandle<'a> {
+pub struct FileSystemHandle {
     pub id: String,
     pub conn_id: String,
     pub mount_point: String,
-    pub session: BackgroundSession<'a>,
 }
 
-impl<'a> FileSystemHandle<'a> {
-    pub fn new(id: &str, conn_id: &str, mount_point: &str, session: BackgroundSession<'a>) -> Self {
+impl FileSystemHandle {
+    pub fn new(id: &str, conn_id: &str, mount_point: &str) -> Self {
         Self {
             id: id.to_string(),
             conn_id: conn_id.to_string(),
             mount_point: mount_point.to_string(),
-            session,
         }
     }
 }
 
-pub struct OpenedProcess {
+pub struct GdbStubHandle {
+    pub id: String,
     pub conn_id: String,
+    pub addr: String,
 }
 
-impl OpenedProcess {
-    pub fn new(conn_id: &str) -> Self {
+impl GdbStubHandle {
+    pub fn new(id: &str, conn_id: &str, addr: &str) -> Self {
         Self {
+            id: id.to_string(),
             conn_id: conn_id.to_string(),
+            addr: addr.to_string(),
         }
     }
 }

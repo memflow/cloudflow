@@ -1,4 +1,5 @@
 use crate::dispatch::*;
+use crate::Config;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 
@@ -37,17 +38,20 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
         )
 }
 
-pub fn handle_command(matches: &ArgMatches) {
+pub fn handle_command(conf: &Config, matches: &ArgMatches) {
     trace!("handling command");
 
     let name = matches.value_of(CONNECTOR_NAME).unwrap();
     let args = matches.value_of(CONNECTOR_ARGS);
     let alias = matches.value_of(CONNECTOR_ALIAS);
 
-    dispatch_request(request::Message::Connect(request::Connect {
-        name: name.to_string(),
-        args: args.map(|s| s.to_string()),
-        alias: alias.map(|a| a.to_string()),
-    }))
+    dispatch_request(
+        conf,
+        request::Message::Connect(request::Connect {
+            name: name.to_string(),
+            args: args.map(|s| s.to_string()),
+            alias: alias.map(|a| a.to_string()),
+        }),
+    )
     .unwrap();
 }
