@@ -6,7 +6,7 @@ use crate::state::{CachedWin32Process, KernelHandle};
 
 use std::sync::{Arc, Mutex};
 
-use memflow_core::*;
+use memflow::*;
 use memflow_win32::*;
 
 use pelite::pe64::imports::Import;

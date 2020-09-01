@@ -9,7 +9,7 @@ use crate::state::{new_uuid, STATE};
 use futures::Sink;
 use std::marker::Unpin;
 
-use memflow_core::PID;
+use memflow::PID;
 
 pub async fn attach<S: Sink<response::Message> + Unpin>(
     frame: &mut S,

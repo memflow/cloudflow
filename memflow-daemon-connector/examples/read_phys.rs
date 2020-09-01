@@ -6,7 +6,7 @@ use log::{info, Level};
 extern crate clap;
 use clap::{App, Arg};
 
-use memflow_core::*;
+use memflow::*;
 
 fn main() {
     let matches = App::new(crate_name!())
@@ -27,7 +27,7 @@ fn main() {
     simple_logger::init_with_level(Level::Debug).unwrap();
 
     let host = matches.value_of("host").unwrap();
-    let args = ConnectorArgs::try_parse_str(host).unwrap();
+    let args = ConnectorArgs::parse(host).unwrap();
     let mut conn = match memflow_daemon_connector::create_connector(&args) {
         Ok(br) => br,
         Err(e) => {

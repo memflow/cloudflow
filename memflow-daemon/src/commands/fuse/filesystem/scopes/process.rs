@@ -2,15 +2,15 @@ use super::super::{FileSystemEntry, FileSystemFileHandler, StaticFileReader};
 use crate::error::{Error, Result};
 use crate::state::KernelHandle;
 
-use memflow_core::mem::VirtualMemory;
-use memflow_core::types::size;
+use memflow::mem::VirtualMemory;
+use memflow::types::size;
 use memflow_win32::*;
 
 use std::cell::RefCell;
 
 use std::sync::{Arc, Mutex};
 
-use memflow_core::types::PageType;
+use memflow::types::PageType;
 
 pub struct ProcessInfoFile {
     pistr: String,

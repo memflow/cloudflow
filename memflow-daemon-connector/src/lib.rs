@@ -8,7 +8,7 @@ use tokio_serde::formats::*;
 use tokio_serde::{formats::Json, SymmetricallyFramed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
-use memflow_core::*;
+use memflow::*;
 use memflow_daemon::{request, response};
 use memflow_derive::connector;
 

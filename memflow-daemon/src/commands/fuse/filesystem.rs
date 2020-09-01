@@ -15,7 +15,7 @@ use log::info;
 use fuse_mt::*;
 use time::*;
 
-use memflow_core::mem::phys_mem::PhysicalMemory;
+use memflow::mem::phys_mem::PhysicalMemory;
 
 pub type ChildrenList = Vec<Arc<Box<dyn FileSystemEntry>>>;
 

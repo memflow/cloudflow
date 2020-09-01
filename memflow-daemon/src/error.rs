@@ -29,7 +29,7 @@ pub enum Error {
     /// Connector error
     Connector(&'static str),
     /// memflow core error
-    Core(memflow_core::error::Error),
+    Core(memflow::error::Error),
     /// memflow win32 error
     Win32(memflow_win32::error::Error),
     /// PE error.
@@ -45,9 +45,9 @@ impl convert::From<&'static str> for Error {
     }
 }
 
-/// Convert from memflow_core::error::Error to error
-impl convert::From<memflow_core::error::Error> for Error {
-    fn from(error: memflow_core::error::Error) -> Self {
+/// Convert from memflow::error::Error to error
+impl convert::From<memflow::error::Error> for Error {
+    fn from(error: memflow::error::Error) -> Self {
         Error::Core(error)
     }
 }

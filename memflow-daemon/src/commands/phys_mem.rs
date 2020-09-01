@@ -7,7 +7,7 @@ use crate::state::{KernelHandle, STATE};
 use futures::Sink;
 use std::marker::Unpin;
 
-use memflow_core::*;
+use memflow::*;
 
 pub async fn read<S: Sink<response::Message> + Unpin>(
     frame: &mut S,

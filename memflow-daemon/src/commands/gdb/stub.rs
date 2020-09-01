@@ -13,7 +13,7 @@ use gdbstub::{
     TidSelector, SINGLE_THREAD_TID,
 };
 
-use memflow_core::*;
+use memflow::*;
 
 fn wait_for_tcp(sockaddr: &str) -> Result<TcpStream> {
     info!("started tcp gdb stub on {:?}", sockaddr);

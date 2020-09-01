@@ -6,7 +6,7 @@ use tokio::sync::{Mutex, MutexGuard};
 use lazy_static::lazy_static;
 use uuid::Uuid;
 
-use memflow_core::*;
+use memflow::*;
 use memflow_win32::*;
 
 lazy_static! {

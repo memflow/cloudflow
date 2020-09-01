@@ -83,7 +83,7 @@ pub async fn send_binary_data<S: Sink<response::Message> + Unpin>(
 
 pub async fn send_phys_mem_metadata<S: Sink<response::Message> + Unpin>(
     frame: &mut S,
-    metadata: memflow_core::PhysicalMemoryMetadata,
+    metadata: memflow::PhysicalMemoryMetadata,
 ) -> Result<()> {
     frame
         .send(response::Message::PhysicalMemoryMetadata(
