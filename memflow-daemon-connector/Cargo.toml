@@ -3,17 +3,20 @@ name = "memflow-daemon-connector"
 version = "0.1.0"
 authors = ["ko1N <ko1N1337@gmail.com>"]
 edition = "2018"
+license = "MIT"
 description = "daemon remote connector for the memflow physical memory introspection framework"
 homepage = "https://memflow.github.io"
 repository = "https://github.com/memflow/memflow-cli"
 readme = "README.md"
+keywords = [ "memflow", "introspection", "memory" ]
+categories = [ "api-bindings", "memory-management", "os" ]
 
 [lib]
 crate-type = ["lib", "cdylib"]
 
 [dependencies]
-memflow = { version = "0.1", git = "ssh://git@github.com/memflow/memflow.git", branch = "dev", features = ["inventory"] }
-memflow-derive = { version = "0.1", git = "ssh://git@github.com/memflow/memflow.git", branch = "dev" }
+memflow = { version = "0.1", git = "https://github.com/memflow/memflow", branch = "master", features = ["inventory"] }
+memflow-derive = { version = "0.1", git = "https://github.com/memflow/memflow", branch = "master" }
 memflow-daemon = { path = "../memflow-daemon" }
 log = { version = "0.4.8", default-features = false }
 url = "2.1"

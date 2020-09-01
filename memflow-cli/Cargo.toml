@@ -1,8 +1,15 @@
 [package]
-name = "memflow"
+name = "memflow-cli"
 version = "0.1.0"
 authors = ["ko1N <ko1N1337@gmail.com>"]
 edition = "2018"
+license = "MIT"
+description = "memflow daemon command line interface"
+homepage = "https://memflow.github.io"
+repository = "https://github.com/memflow/memflow-cli"
+readme = "README.md"
+keywords = [ "memflow", "introspection", "memory" ]
+categories = [ "api-bindings", "memory-management", "os" ]
 
 [dependencies]
 memflow-daemon = { path = "../memflow-daemon" }

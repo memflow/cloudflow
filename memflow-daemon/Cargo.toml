@@ -3,10 +3,17 @@ name = "memflow-daemon"
 version = "0.1.0"
 authors = ["ko1N <ko1N1337@gmail.com>"]
 edition = "2018"
+license = "MIT"
+description = "memflow daemon service"
+homepage = "https://memflow.github.io"
+repository = "https://github.com/memflow/memflow-cli"
+readme = "README.md"
+keywords = [ "memflow", "introspection", "memory" ]
+categories = [ "api-bindings", "memory-management", "os" ]
 
 [dependencies]
-memflow = { version = "0.1", git = "ssh://git@github.com/memflow/memflow.git", branch = "dev", features = ["inventory", "serde_derive"] }
-memflow-win32 = { version = "0.1", git = "ssh://git@github.com/memflow/memflow.git", branch = "dev", features = ["serde_derive"] }
+memflow = { version = "0.1", git = "https://github.com/memflow/memflow", branch = "master", features = ["inventory", "serde_derive"] }
+memflow-win32 = { version = "0.1", git = "https://github.com/memflow/memflow", branch = "master", features = ["serde_derive"] }
 clap = { version = "2.33.0" }
 log = "0.4.8"
 simple_logger = "1.0.1"
@@ -33,7 +40,7 @@ time = "0.1"
 fuse_mt = "0.5"
 libc = "0.2.51"
 bitfield = "0.13.2"
-pelite = { git = "https://github.com/ko1N/pelite", features = ["serde"] }
+pelite = { version = "0.8", git = "https://github.com/h33p/pelite", branch = "wrap", features = ["serde"] }
 
 # gdb
 gdbstub = "0.2"
