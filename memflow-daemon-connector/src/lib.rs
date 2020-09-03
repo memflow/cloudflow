@@ -140,42 +140,51 @@ async fn phys_read_raw_list(
     conn_id: &str,
     data: &mut [PhysicalReadData<'_>],
 ) -> Result<()> {
-    for d in data.iter_mut() {
-        // send request
-        stream
-            .send(request::Message::ReadPhysicalMemory(
-                request::ReadPhysicalMemory {
-                    conn_id: conn_id.to_string(),
-                    addr: d.0,
-                    len: d.1.len(),
-                },
-            ))
-            .await
-            .map_err(|e| {
-                error!("{}", e);
-                Error::IO("unable to send physical read request")
-            })?;
+    let mut reads = Vec::new();
+    for d in data.iter() {
+        reads.push(request::ReadPhysicalMemoryEntry {
+            addr: d.0,
+            len: d.1.len(),
+        });
+    }
 
-        // wait for reply
-        if let Ok(msg) = stream.try_next().await {
-            match msg {
-                response::Message::BinaryData(msg) => {
-                    d.1.clone_from_slice(msg.data.as_slice());
+    // send request
+    stream
+        .send(request::Message::ReadPhysicalMemory(
+            request::ReadPhysicalMemory {
+                conn_id: conn_id.to_string(),
+                reads,
+            },
+        ))
+        .await
+        .map_err(|e| {
+            error!("{}", e);
+            Error::IO("unable to send physical read request")
+        })?;
+
+    // wait for reply
+    if let Ok(msg) = stream.try_next().await {
+        match msg {
+            response::Message::PhysicalMemoryRead(msg) => {
+                //d.1.clone_from_slice(msg.data.as_slice());
+                for read in msg.reads.iter().zip(data.iter_mut()) {
+                    (read.1).1.clone_from_slice(read.0.data.as_slice());
                 }
-                response::Message::Result(msg) => {
-                    if !msg.success {
-                        // TODO: continue batch on error
-                        info!("failure received: {}", msg.msg);
-                        return Err(Error::Other("failure received"));
-                    }
+            }
+            response::Message::Result(msg) => {
+                if !msg.success {
+                    // TODO: continue batch on error
+                    info!("failure received: {}", msg.msg);
+                    return Err(Error::Other("failure received"));
                 }
-                _ => {
-                    info!("invalid message received");
-                    return Err(Error::Other("invalid message received"));
-                }
+            }
+            _ => {
+                info!("invalid message received");
+                return Err(Error::Other("invalid message received"));
             }
         }
     }
+
     Ok(())
 }
 
@@ -184,39 +193,45 @@ async fn phys_write_raw_list(
     conn_id: &str,
     data: &[PhysicalWriteData<'_>],
 ) -> Result<()> {
+    let mut writes = Vec::new();
     for d in data.iter() {
-        // send request
-        stream
-            .send(request::Message::WritePhysicalMemory(
-                request::WritePhysicalMemory {
-                    conn_id: conn_id.to_string(),
-                    addr: d.0,
-                    data: d.1.to_vec(),
-                },
-            ))
-            .await
-            .map_err(|e| {
-                error!("{}", e);
-                Error::IO("unable to send physical write request")
-            })?;
+        writes.push(request::WritePhysicalMemoryEntry {
+            addr: d.0,
+            data: d.1.to_vec(),
+        });
+    }
 
-        // wait for reply
-        if let Ok(msg) = stream.try_next().await {
-            match msg {
-                response::Message::Result(msg) => {
-                    if !msg.success {
-                        // TODO: continue batch on error
-                        info!("failure received: {}", msg.msg);
-                        return Err(Error::Other("failure received"));
-                    }
+    // send request
+    stream
+        .send(request::Message::WritePhysicalMemory(
+            request::WritePhysicalMemory {
+                conn_id: conn_id.to_string(),
+                writes,
+            },
+        ))
+        .await
+        .map_err(|e| {
+            error!("{}", e);
+            Error::IO("unable to send physical write request")
+        })?;
+
+    // wait for reply
+    if let Ok(msg) = stream.try_next().await {
+        match msg {
+            response::Message::Result(msg) => {
+                if !msg.success {
+                    // TODO: continue batch on error
+                    info!("failure received: {}", msg.msg);
+                    return Err(Error::Other("failure received"));
                 }
-                _ => {
-                    info!("invalid message received");
-                    return Err(Error::Other("invalid message received"));
-                }
+            }
+            _ => {
+                info!("invalid message received");
+                return Err(Error::Other("invalid message received"));
             }
         }
     }
+
     Ok(())
 }
 

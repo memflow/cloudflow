@@ -6,8 +6,8 @@ pub enum Message {
     Log(Log),
     /// Message that contains a table
     Table(Table),
-    /// Message that contains binary data
-    BinaryData(BinaryData),
+    /// Message that contains the data read from physical memory
+    PhysicalMemoryRead(PhysicalMemoryRead),
     /// Message that contains physical memory metadata
     PhysicalMemoryMetadata(PhysicalMemoryMetadata),
     /// Message that contains a result
@@ -27,9 +27,14 @@ pub struct Table {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
-pub struct BinaryData {
+pub struct PhysicalMemoryReadEntry {
     #[serde(with = "serde_bytes")]
     pub data: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct PhysicalMemoryRead {
+    pub reads: Vec<PhysicalMemoryReadEntry>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

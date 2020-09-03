@@ -71,12 +71,14 @@ pub async fn send_table<S: Sink<response::Message> + Unpin>(
         .map_err(|_| Error::IO)
 }
 
-pub async fn send_binary_data<S: Sink<response::Message> + Unpin>(
+pub async fn send_phys_mem_read<S: Sink<response::Message> + Unpin>(
     frame: &mut S,
-    data: Vec<u8>,
+    reads: Vec<response::PhysicalMemoryReadEntry>,
 ) -> Result<()> {
     frame
-        .send(response::Message::BinaryData(response::BinaryData { data }))
+        .send(response::Message::PhysicalMemoryRead(
+            response::PhysicalMemoryRead { reads },
+        ))
         .await
         .map_err(|_| Error::IO)
 }

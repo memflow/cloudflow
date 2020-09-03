@@ -37,18 +37,28 @@ pub struct CloseConnection {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct ReadPhysicalMemory {
-    pub conn_id: String,
+pub struct ReadPhysicalMemoryEntry {
     pub addr: PhysicalAddress,
     pub len: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct WritePhysicalMemory {
+pub struct ReadPhysicalMemory {
     pub conn_id: String,
+    pub reads: Vec<ReadPhysicalMemoryEntry>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct WritePhysicalMemoryEntry {
     pub addr: PhysicalAddress,
     #[serde(with = "serde_bytes")]
     pub data: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct WritePhysicalMemory {
+    pub conn_id: String,
+    pub writes: Vec<WritePhysicalMemoryEntry>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
