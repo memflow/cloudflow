@@ -15,8 +15,8 @@ categories = [ "api-bindings", "memory-management", "os" ]
 crate-type = ["lib", "cdylib"]
 
 [dependencies]
-memflow = { version = "0.1", git = "https://github.com/memflow/memflow", branch = "master", features = ["inventory"] }
-memflow-derive = { version = "0.1", git = "https://github.com/memflow/memflow", branch = "master" }
+memflow = { version = "0.1", features = ["inventory"] }
+memflow-derive = { version = "0.1" }
 memflow-daemon = { path = "../memflow-daemon" }
 log = { version = "0.4.8", default-features = false }
 url = "2.1"

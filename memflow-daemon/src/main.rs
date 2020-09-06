@@ -76,53 +76,54 @@ async fn handle_message<S: Sink<response::Message> + Unpin>(
         request::Message::Connect(msg) => {
             commands::connection::new(frame, msg)
                 .await
-                .expect("failed to execute command");
+                .expect("failed to execute connection::new command");
         }
         request::Message::ListConnections => {
             commands::connection::ls(frame)
                 .await
-                .expect("failed to execute command");
+                .expect("failed to execute connection::ls command");
         }
         request::Message::CloseConnection(msg) => {
             commands::connection::rm(frame, msg)
                 .await
-                .expect("failed to execute command");
+                .expect("failed to execute connection::rm command");
         }
 
         request::Message::ReadPhysicalMemory(msg) => {
             commands::phys_mem::read(frame, msg)
                 .await
-                .expect("failed to execute command");
+                .expect("failed to execute phys_mem::read command");
         }
         request::Message::WritePhysicalMemory(msg) => {
             commands::phys_mem::write(frame, msg)
                 .await
-                .expect("failed to execute command");
+                .expect("failed to execute phys_mem::write command");
         }
         request::Message::PhysicalMemoryMetadata(msg) => {
             commands::phys_mem::metadata(frame, msg)
                 .await
-                .expect("failed to execute command");
+                .expect("failed to execute phys_mem::metadata command");
         }
 
         // TODO: make os specific
         request::Message::FuseMount(msg) => commands::fuse::mount(frame, msg)
             .await
-            .expect("failed to execute command"),
+            .expect("failed to execute fuse::mount command"),
         request::Message::FuseListMounts => commands::fuse::ls(frame)
             .await
-            .expect("failed to execute command"),
+            .expect("failed to execute fuse::ls command"),
 
         request::Message::GdbAttach(msg) => commands::gdb::attach(frame, msg)
             .await
-            .expect("failed to execute command"),
+            .expect("failed to execute gdb::attach command"),
         request::Message::GdbList => commands::gdb::ls(frame)
             .await
-            .expect("failed to execute command"),
+            .expect("failed to execute gdb::ls command"),
+
         request::Message::ListProcesses(msg) => {
             commands::process::ls(frame, msg)
                 .await
-                .expect("failed to execute command");
+                .expect("failed to execute process::ls command");
         }
         request::Message::OpenProcess(_msg) => {
             // TODO:

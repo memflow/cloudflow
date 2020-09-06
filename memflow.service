@@ -1,0 +1,9 @@
+[Unit]
+Description=memflow daemon service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/memflowd --config /etc/memflow/daemon.conf
+
+[Install]
+WantedBy=default.target
