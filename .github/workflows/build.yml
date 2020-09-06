@@ -12,6 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - name: install fuse
+        run: sudo apt-get install fuse
+
       - name: Build
         run: cargo build --workspace --verbose
 
@@ -23,6 +26,9 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - name: install fuse
+        run: sudo apt-get install fuse
+
       - name: Run all tests
         run: cargo test --workspace --verbose
 
@@ -30,9 +36,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+
+      - name: install fuse
+        run: sudo apt-get install fuse
+
       - run: rustup component add clippy
+
       - name: Check formatting
         run: cargo fmt -- --check
+
       - uses: actions-rs/clippy-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -42,13 +54,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+
+      - name: install fuse
+        run: sudo apt-get install fuse
+
       - name: Set up Rust nightly
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: nightly
           override: true
+
       - run: cargo install grcov
+
       - name: Run tests with coverage
         run: |
           export CARGO_INCREMENTAL=0
