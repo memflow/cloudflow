@@ -43,4 +43,4 @@ bitfield = "0.13.2"
 pelite = { version = "0.9", features = ["serde"] }
 
 # gdb
-gdbstub = "0.2.1"
+gdbstub = "=0.2.1"
