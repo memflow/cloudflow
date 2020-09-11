@@ -40,7 +40,7 @@ time = "0.1"
 fuse_mt = "0.5"
 libc = "0.2.51"
 bitfield = "0.13.2"
-pelite = { version = "0.8", git = "https://github.com/h33p/pelite", branch = "wrap", features = ["serde"] }
+pelite = { version = "0.9", features = ["serde"] }
 
 # gdb
-gdbstub = "0.2"
+gdbstub = "0.2.1"
