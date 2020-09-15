@@ -21,6 +21,7 @@ simple-logging = "2.0.2"
 url = "2.1"
 lazy_static = "1.4"
 uuid = { version = "0.8", features = ["v4"] }
+minidump-writer = { git = "https://github.com/h33p/minidump-writer" }
 
 # tokio
 tokio = { version = "0.2", features = ["full"] }
