@@ -7,22 +7,25 @@ mod dispatch;
 extern crate clap;
 use clap::{App, Arg};
 
-use log::Level;
+use log::LevelFilter;
+
+use simple_logger::SimpleLogger;
 
 pub struct Config {
     pub host: String,
 }
 
 fn main() {
-    let matches = App::new(crate_name!())
+    let long_version = format!("version: {}", crate_version!());
+    let mut app = App::new(crate_name!())
         .version(crate_version!())
-        .long_version(format!("version: {}", crate_version!()).as_str())
+        .long_version(long_version.as_str())
         .author(crate_authors!())
         .about("memflow command line interface")
         .after_help(crate_description!())
         .arg(
             Arg::with_name("host")
-                .short("h")
+                .short("H")
                 .long("host")
                 .takes_value(true)
                 .required(false)
@@ -31,10 +34,11 @@ fn main() {
         .subcommand(commands::connection::command_definition())
         .subcommand(commands::fuse::command_definition())
         .subcommand(commands::proc::command_definition())
-        .subcommand(commands::gdb::command_definition())
-        .get_matches();
+        .subcommand(commands::gdb::command_definition());
 
-    simple_logger::init_with_level(Level::Debug).unwrap();
+    let matches = app.clone().get_matches();
+
+    SimpleLogger::with_level(SimpleLogger::new(), LevelFilter::Debug);
 
     let host = matches.value_of("host").unwrap().to_string();
     let conf = Config { host };
@@ -52,6 +56,10 @@ fn main() {
         (commands::gdb::COMMAND_STR, Some(subargv)) => {
             commands::gdb::handle_command(&conf, subargv)
         }
-        _ => ::std::process::exit(1),
+        _ => {
+            app.print_help().ok();
+            println!();
+            ::std::process::exit(1);
+        }
     }
 }

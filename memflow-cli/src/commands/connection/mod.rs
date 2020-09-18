@@ -25,6 +25,10 @@ pub fn handle_command(conf: &Config, matches: &ArgMatches) {
         (new::COMMAND_STR, Some(matches)) => new::handle_command(conf, matches),
         (ls::COMMAND_STR, Some(matches)) => ls::handle_command(conf, matches),
         (rm::COMMAND_STR, Some(matches)) => rm::handle_command(conf, matches),
-        _ => ::std::process::exit(1),
+        _ => {
+            command_definition().print_help().ok();
+            println!();
+            ::std::process::exit(1)
+        }
     }
 }

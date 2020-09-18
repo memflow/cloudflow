@@ -22,6 +22,10 @@ pub fn handle_command(conf: &Config, matches: &ArgMatches) {
     match matches.subcommand() {
         (attach::COMMAND_STR, Some(matches)) => attach::handle_command(conf, matches),
         (ls::COMMAND_STR, Some(matches)) => ls::handle_command(conf, matches),
-        _ => ::std::process::exit(1),
+        _ => {
+            command_definition().print_help().ok();
+            println!();
+            ::std::process::exit(1)
+        }
     }
 }
