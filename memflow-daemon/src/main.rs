@@ -16,6 +16,9 @@ extern crate clap;
 use clap::{App, Arg};
 
 use log::{error, info, LevelFilter};
+use simplelog::{CombinedLogger, SharedLogger, TermLogger, TerminalMode, WriteLogger};
+use std::fs::File;
+
 use url::Url;
 
 use futures::prelude::*;
@@ -243,13 +246,34 @@ async fn main() -> Result<()> {
         _ => LevelFilter::Trace,
     };
 
+    // set console verbosity
+    let console_log_filter = match matches.occurrences_of("verbose") {
+        0 => log_filter,
+        1 => LevelFilter::Error,
+        2 => LevelFilter::Warn,
+        3 => LevelFilter::Info,
+        4 => LevelFilter::Debug,
+        _ => LevelFilter::Trace,
+    };
+
     // setup logging
+    let mut loggers: Vec<Box<dyn SharedLogger>> = vec![TermLogger::new(
+        console_log_filter,
+        simplelog::Config::default(),
+        TerminalMode::Mixed,
+    )];
+
     if let Some(log_file) = config.log_file {
-        simple_logging::log_to_file(log_file, log_filter)
-            .expect("Unable to create log file. Insufficent privileges? (rerun with -E)");
-    } else {
-        simple_logger::init_with_level(log_filter.to_level().unwrap()).unwrap();
+        let log_file = File::create(log_file)
+            .expect("Unable to create log file. Insufficent privileges? (rerun with -E");
+        loggers.push(WriteLogger::new(
+            log_filter,
+            simplelog::Config::default(),
+            log_file,
+        ));
     }
+
+    let _ = CombinedLogger::init(loggers);
 
     // instantiate pid file
     let _pid_file = PidFile::new(
