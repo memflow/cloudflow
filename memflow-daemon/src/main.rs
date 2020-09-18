@@ -209,7 +209,20 @@ async fn main() -> Result<()> {
                 .required(false)
                 .default_value(CONFIG_FILE),
         )
+        .arg(
+            Arg::with_name("elevate")
+                .short("E")
+                .long("elevate")
+                .help("elevate privileges upon start")
+                .takes_value(false)
+                .required(false)
+                .default_value(CONFIG_FILE),
+        )
         .get_matches();
+
+    if matches.occurrences_of("elevate") > 0 {
+        sudo::escalate_if_needed().expect("failed to elevate privileges");
+    }
 
     // load config
     let config_path = matches.value_of("config").unwrap();
@@ -232,7 +245,8 @@ async fn main() -> Result<()> {
 
     // setup logging
     if let Some(log_file) = config.log_file {
-        simple_logging::log_to_file(log_file, log_filter).unwrap();
+        simple_logging::log_to_file(log_file, log_filter)
+            .expect("Unable to create log file. Insufficent privileges? (rerun with -E)");
     } else {
         simple_logger::init_with_level(log_filter.to_level().unwrap()).unwrap();
     }
@@ -243,7 +257,7 @@ async fn main() -> Result<()> {
             .pid_file
             .unwrap_or_else(|| "/var/run/memflow.pid".to_string()),
     )
-    .unwrap();
+    .expect("Failed to create PID file. Insufficent privileges? (rerun with -E)");
 
     // setup the listening socket
     let url =

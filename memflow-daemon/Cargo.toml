@@ -42,6 +42,7 @@ fuse_mt = "0.5"
 libc = "0.2.51"
 bitfield = "0.13.2"
 pelite = { version = "0.9", features = ["serde"] }
+sudo = "0.5"
 
 # gdb
 gdbstub = "=0.2.1"
