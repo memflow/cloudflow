@@ -234,7 +234,10 @@ async fn main() -> Result<()> {
     if let Some(log_file) = config.log_file {
         simple_logging::log_to_file(log_file, log_filter).unwrap();
     } else {
-        simple_logger::init_with_level(log_filter.to_level().unwrap()).unwrap();
+        simple_logger::SimpleLogger::new()
+            .with_level(log_filter)
+            .init()
+            .unwrap();
     }
 
     // instantiate pid file

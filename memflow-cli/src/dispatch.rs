@@ -14,7 +14,7 @@ use memflow_daemon::{request, response};
 use prettytable::{format, Table};
 
 pub fn dispatch_request(conf: &Config, req: request::Message) -> Result<()> {
-    let mut rt = tokio::runtime::Runtime::new().unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(dispatch_async(conf, req))
 }
 

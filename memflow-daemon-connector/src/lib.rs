@@ -2,7 +2,7 @@ use log::{error, info};
 use url::Url;
 
 use futures::prelude::*;
-use tokio::net::{tcp, TcpStream};
+use tokio::net::{tcp, unix, TcpStream, UnixStream};
 use tokio::runtime::Runtime;
 use tokio_serde::formats::*;
 use tokio_serde::{formats::Json, SymmetricallyFramed};
@@ -11,6 +11,18 @@ use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use memflow::*;
 use memflow_daemon::{request, response};
 use memflow_derive::connector;
+
+// framed udp read/write pairs
+type FramedUdsRequestWriter = SymmetricallyFramed<
+    FramedWrite<unix::OwnedWriteHalf, LengthDelimitedCodec>,
+    request::Message,
+    Json<request::Message, request::Message>,
+>;
+type FramedUdsResponseReader = SymmetricallyFramed<
+    FramedRead<unix::OwnedReadHalf, LengthDelimitedCodec>,
+    response::Message,
+    Json<response::Message, response::Message>,
+>;
 
 // framed tcp read/write pairs
 type FramedTcpRequestWriter = SymmetricallyFramed<
@@ -25,15 +37,18 @@ type FramedTcpResponseReader = SymmetricallyFramed<
 >;
 
 /// A read/write framed pair for a stream.
-/// This does only work with TcpStream currently until the split_owned functionality for uds is released.
-/// See https://github.com/tokio-rs/tokio/blob/master/tokio/src/net/unix/split_owned.rs for more details.
 enum FramedStream {
+    Uds((FramedUdsRequestWriter, FramedUdsResponseReader)),
     Tcp((FramedTcpRequestWriter, FramedTcpResponseReader)),
 }
 
 impl FramedStream {
     pub async fn send(&mut self, item: request::Message) -> Result<()> {
         match self {
+            FramedStream::Uds((writer, _)) => writer.send(item).await.map_err(|e| {
+                error!("{}", e);
+                Error::IO("unable to send message")
+            }),
             FramedStream::Tcp((writer, _)) => writer.send(item).await.map_err(|e| {
                 error!("{}", e);
                 Error::IO("unable to send message")
@@ -43,6 +58,14 @@ impl FramedStream {
 
     pub async fn try_next(&mut self) -> Result<response::Message> {
         match self {
+            FramedStream::Uds((_, reader)) => reader
+                .try_next()
+                .await
+                .map_err(|e| {
+                    error!("{}", e);
+                    Error::IO("unable to read read message")
+                })?
+                .ok_or_else(|| Error::IO("no more messages")),
             FramedStream::Tcp((_, reader)) => reader
                 .try_next()
                 .await
@@ -86,9 +109,30 @@ async fn connect_tcp(addr: &str) -> Result<FramedStream> {
     Ok(FramedStream::Tcp((serializer, deserializer)))
 }
 
+async fn connect_uds(addr: &str) -> Result<FramedStream> {
+    let socket = UnixStream::connect(addr)
+        .await
+        .map_err(|_| Error::Other("unable to connect to udp socket"))?;
+    let (reader, writer) = socket.into_split();
+
+    let framed_writer = FramedWrite::new(writer, LengthDelimitedCodec::new());
+    let serializer = tokio_serde::SymmetricallyFramed::new(
+        framed_writer,
+        SymmetricalJson::<request::Message>::default(),
+    );
+
+    let framed_reader = FramedRead::new(reader, LengthDelimitedCodec::new());
+    let deserializer = tokio_serde::SymmetricallyFramed::new(
+        framed_reader,
+        SymmetricalJson::<response::Message>::default(),
+    );
+
+    Ok(FramedStream::Uds((serializer, deserializer)))
+}
+
 impl DaemonConnector {
     pub fn new(addr: &str, conn_id: &str) -> Result<Self> {
-        let mut rt = tokio::runtime::Runtime::new().map_err(|e| {
+        let rt = tokio::runtime::Runtime::new().map_err(|e| {
             error!("{}", e);
             Error::Other("unable to instantiate tokio runtime")
         })?;
@@ -107,9 +151,17 @@ impl DaemonConnector {
                 }
             }
             "unix" => {
-                return Err(Error::Other("unix sockets are not implemented yet"));
+                if let Ok(path) = url.to_file_path() {
+                    rt.block_on(connect_uds(&format!(
+                        "{}:{}",
+                        path.to_string_lossy(),
+                        url.port().unwrap_or(8000)
+                    )))?
+                } else {
+                    return Err(Error::Other("invalid unix domain socket path"));
+                }
             }
-            _ => return Err(Error::Other("only tcp urls are supported")),
+            _ => return Err(Error::Other("only unix and tcp urls are supported")),
         };
 
         // read metadata
