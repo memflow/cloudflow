@@ -24,7 +24,10 @@ fn main() {
         )
         .get_matches();
 
-    simple_logger::init_with_level(Level::Debug).unwrap();
+    simple_logger::SimpleLogger::new()
+        .with_level(Level::Debug.to_level_filter())
+        .init()
+        .unwrap();
 
     let host = matches.value_of("host").unwrap();
     let args = ConnectorArgs::parse(host).unwrap();
