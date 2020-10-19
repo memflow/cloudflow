@@ -14,7 +14,7 @@ lazy_static! {
 }
 
 pub fn state_lock_sync<'a>() -> MutexGuard<'a, State> {
-    let mut rt = tokio::runtime::Runtime::new().unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(STATE.lock())
 }
 

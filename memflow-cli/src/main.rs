@@ -7,9 +7,7 @@ mod dispatch;
 extern crate clap;
 use clap::{App, Arg};
 
-use log::LevelFilter;
-
-use simple_logger::SimpleLogger;
+use log::Level;
 
 pub struct Config {
     pub host: String,
@@ -38,7 +36,10 @@ fn main() {
 
     let matches = app.clone().get_matches();
 
-    SimpleLogger::with_level(SimpleLogger::new(), LevelFilter::Debug);
+    simple_logger::SimpleLogger::new()
+        .with_level(Level::Debug.to_level_filter())
+        .init()
+        .unwrap();
 
     let host = matches.value_of("host").unwrap().to_string();
     let conf = Config { host };
