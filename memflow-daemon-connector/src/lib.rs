@@ -192,7 +192,7 @@ async fn phys_read_raw_list(
 ) -> Result<()> {
     let mut batch = Vec::new();
     let mut bytes_requested = 0usize;
-    for d in data.into_iter() {
+    for d in data.iter_mut() {
         bytes_requested += d.1.len();
         batch.push(d);
         if bytes_requested >= size::mb(1) {
