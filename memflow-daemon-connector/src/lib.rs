@@ -190,6 +190,30 @@ async fn phys_read_raw_list(
     conn_id: &str,
     data: &mut [PhysicalReadData<'_>],
 ) -> Result<()> {
+    let mut batch = Vec::new();
+    let mut bytes_requested = 0usize;
+    for d in data.into_iter() {
+        bytes_requested += d.1.len();
+        batch.push(d);
+        if bytes_requested >= size::mb(1) {
+            phys_read_raw_list_batch(stream, conn_id, batch.as_mut_slice()).await?;
+            bytes_requested = 0;
+            batch.clear();
+        }
+    }
+
+    if !batch.is_empty() {
+        phys_read_raw_list_batch(stream, conn_id, batch.as_mut_slice()).await?;
+    }
+
+    Ok(())
+}
+
+async fn phys_read_raw_list_batch(
+    stream: &mut FramedStream,
+    conn_id: &str,
+    data: &mut [&mut PhysicalReadData<'_>],
+) -> Result<()> {
     let mut reads = Vec::new();
     for d in data.iter() {
         reads.push(request::ReadPhysicalMemoryEntry {
@@ -242,6 +266,30 @@ async fn phys_write_raw_list(
     stream: &mut FramedStream,
     conn_id: &str,
     data: &[PhysicalWriteData<'_>],
+) -> Result<()> {
+    let mut batch = Vec::new();
+    let mut bytes_requested = 0usize;
+    for d in data.iter() {
+        bytes_requested += d.1.len();
+        batch.push(d);
+        if bytes_requested >= size::mb(1) {
+            phys_write_raw_list_batch(stream, conn_id, batch.as_mut_slice()).await?;
+            bytes_requested = 0;
+            batch.clear();
+        }
+    }
+
+    if !batch.is_empty() {
+        phys_write_raw_list_batch(stream, conn_id, batch.as_mut_slice()).await?;
+    }
+
+    Ok(())
+}
+
+async fn phys_write_raw_list_batch(
+    stream: &mut FramedStream,
+    conn_id: &str,
+    data: &[&PhysicalWriteData<'_>],
 ) -> Result<()> {
     let mut writes = Vec::new();
     for d in data.iter() {
