@@ -7,7 +7,11 @@ mod dispatch;
 extern crate clap;
 use clap::{App, Arg};
 
+use log::debug;
 use log::Level;
+
+#[cfg(not(target_os = "windows"))]
+const CONFIG_FILE: &str = "/etc/memflow/daemon.conf";
 
 pub struct Config {
     pub host: String,
@@ -26,8 +30,16 @@ fn main() {
                 .short("H")
                 .long("host")
                 .takes_value(true)
+                .required(false),
+        )
+        .arg(
+            Arg::with_name("config")
+                .short("c")
+                .long("config")
+                .help("the config file path")
+                .takes_value(true)
                 .required(false)
-                .default_value("unix:/var/run/memflow.sock"),
+                .default_value(CONFIG_FILE),
         )
         .subcommand(commands::connection::command_definition())
         .subcommand(commands::fuse::command_definition())
@@ -41,8 +53,22 @@ fn main() {
         .init()
         .unwrap();
 
-    let host = matches.value_of("host").unwrap().to_string();
-    let conf = Config { host };
+    // we first check the 'host' argument
+    // in case 'host' is empty we check the 'config' argument
+    let conf = if let Some(host) = matches.value_of("host") {
+        Config {
+            host: host.to_string(),
+        }
+    } else {
+        let config_path = matches.value_of("config").unwrap();
+        debug!("loading host from configuration file: {}", config_path);
+        let config_str = std::fs::read_to_string(config_path).unwrap();
+        let config: memflow_daemon::Config = serde_json::from_str(&config_str).unwrap();
+        Config {
+            host: config.socket_addr,
+        }
+    };
+    debug!("memflow host: {}", conf.host);
 
     match matches.subcommand() {
         (commands::connection::COMMAND_STR, Some(subargv)) => {

@@ -89,6 +89,7 @@ pub struct DaemonConnector {
 }
 
 async fn connect_tcp(addr: &str) -> Result<FramedStream> {
+    info!("trying to open connection to {}", addr);
     let socket = TcpStream::connect(addr)
         .await
         .map_err(|_| Error::Other("unable to connect to tcp socket"))?;
@@ -110,6 +111,7 @@ async fn connect_tcp(addr: &str) -> Result<FramedStream> {
 }
 
 async fn connect_uds(addr: &str) -> Result<FramedStream> {
+    println!("trying to open connection to {}", addr);
     let socket = UnixStream::connect(addr)
         .await
         .map_err(|_| Error::Other("unable to connect to udp socket"))?;
@@ -152,11 +154,7 @@ impl DaemonConnector {
             }
             "unix" => {
                 if let Ok(path) = url.to_file_path() {
-                    rt.block_on(connect_uds(&format!(
-                        "{}:{}",
-                        path.to_string_lossy(),
-                        url.port().unwrap_or(8000)
-                    )))?
+                    rt.block_on(connect_uds(&format!("{}", path.to_string_lossy())))?
                 } else {
                     return Err(Error::Other("invalid unix domain socket path"));
                 }

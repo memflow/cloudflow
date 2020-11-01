@@ -1,6 +1,9 @@
 mod error;
 use error::{Error, Result};
 
+mod config;
+use config::Config;
+
 mod dto;
 use dto::*;
 
@@ -25,8 +28,6 @@ use futures::prelude::*;
 use tokio::net::{TcpListener, UnixListener};
 use tokio_serde::formats::*;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-
-use serde_derive::Deserialize;
 
 /// Spawns a TCP server and listens for incoming connections.
 /// The TCP server accept framed json messages and dispatches them to the individual command handlers.
@@ -156,15 +157,6 @@ unsafe fn get_gid_by_name(name: &str) -> Option<libc::gid_t> {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-#[derive(Clone, Debug, Deserialize)]
-pub struct Config {
-    verbosity: Option<String>,
-    pid_file: Option<String>,
-    log_file: Option<String>,
-    socket_addr: String,
-}
-
 pub struct PidFile {
     _fd: i32,
 }
@@ -218,8 +210,7 @@ async fn main() -> Result<()> {
                 .long("elevate")
                 .help("elevate privileges upon start")
                 .takes_value(false)
-                .required(false)
-                .default_value(CONFIG_FILE),
+                .required(false),
         )
         .get_matches();
 
