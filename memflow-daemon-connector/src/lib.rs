@@ -89,6 +89,7 @@ pub struct DaemonConnector {
 }
 
 async fn connect_tcp(addr: &str) -> Result<FramedStream> {
+    info!("trying to open connection to {}", addr);
     let socket = TcpStream::connect(addr)
         .await
         .map_err(|_| Error::Other("unable to connect to tcp socket"))?;
@@ -110,6 +111,7 @@ async fn connect_tcp(addr: &str) -> Result<FramedStream> {
 }
 
 async fn connect_uds(addr: &str) -> Result<FramedStream> {
+    println!("trying to open connection to {}", addr);
     let socket = UnixStream::connect(addr)
         .await
         .map_err(|_| Error::Other("unable to connect to udp socket"))?;
@@ -152,11 +154,7 @@ impl DaemonConnector {
             }
             "unix" => {
                 if let Ok(path) = url.to_file_path() {
-                    rt.block_on(connect_uds(&format!(
-                        "{}:{}",
-                        path.to_string_lossy(),
-                        url.port().unwrap_or(8000)
-                    )))?
+                    rt.block_on(connect_uds(&format!("{}", path.to_string_lossy())))?
                 } else {
                     return Err(Error::Other("invalid unix domain socket path"));
                 }
@@ -191,6 +189,30 @@ async fn phys_read_raw_list(
     stream: &mut FramedStream,
     conn_id: &str,
     data: &mut [PhysicalReadData<'_>],
+) -> Result<()> {
+    let mut batch = Vec::new();
+    let mut bytes_requested = 0usize;
+    for d in data.iter_mut() {
+        bytes_requested += d.1.len();
+        batch.push(d);
+        if bytes_requested >= size::mb(1) {
+            phys_read_raw_list_batch(stream, conn_id, batch.as_mut_slice()).await?;
+            bytes_requested = 0;
+            batch.clear();
+        }
+    }
+
+    if !batch.is_empty() {
+        phys_read_raw_list_batch(stream, conn_id, batch.as_mut_slice()).await?;
+    }
+
+    Ok(())
+}
+
+async fn phys_read_raw_list_batch(
+    stream: &mut FramedStream,
+    conn_id: &str,
+    data: &mut [&mut PhysicalReadData<'_>],
 ) -> Result<()> {
     let mut reads = Vec::new();
     for d in data.iter() {
@@ -244,6 +266,30 @@ async fn phys_write_raw_list(
     stream: &mut FramedStream,
     conn_id: &str,
     data: &[PhysicalWriteData<'_>],
+) -> Result<()> {
+    let mut batch = Vec::new();
+    let mut bytes_requested = 0usize;
+    for d in data.iter() {
+        bytes_requested += d.1.len();
+        batch.push(d);
+        if bytes_requested >= size::mb(1) {
+            phys_write_raw_list_batch(stream, conn_id, batch.as_mut_slice()).await?;
+            bytes_requested = 0;
+            batch.clear();
+        }
+    }
+
+    if !batch.is_empty() {
+        phys_write_raw_list_batch(stream, conn_id, batch.as_mut_slice()).await?;
+    }
+
+    Ok(())
+}
+
+async fn phys_write_raw_list_batch(
+    stream: &mut FramedStream,
+    conn_id: &str,
+    data: &[&PhysicalWriteData<'_>],
 ) -> Result<()> {
     let mut writes = Vec::new();
     for d in data.iter() {

@@ -148,24 +148,28 @@ pub trait FileSystemFileHandler {
 /// This reader provides a basic implementation of a `FileSystemFileHandler`.
 /// It will just return the contents being put into it when reading.
 struct StaticFileReader {
-    contents: String,
+    contents: Vec<u8>,
 }
 
 impl StaticFileReader {
     pub fn new(contents: &str) -> Self {
         Self {
-            contents: contents.to_string(),
+            contents: contents.as_bytes().iter().copied().collect(),
         }
     }
 
-    pub fn from_string(contents: String) -> Self {
+    pub fn from_vec(contents: Vec<u8>) -> Self {
         Self { contents }
+    }
+
+    pub fn from_string(contents: String) -> Self {
+        Self::new(contents.as_str())
     }
 }
 
 impl FileSystemFileHandler for StaticFileReader {
     fn read(&mut self, offset: u64, size: u32) -> Result<Vec<u8>> {
-        let contents = self.contents.as_bytes();
+        let contents = &self.contents;
 
         let start = std::cmp::min((offset + 1) as usize, contents.len())
             .checked_sub(1)

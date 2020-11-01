@@ -1,6 +1,9 @@
 mod error;
 use error::{Error, Result};
 
+mod config;
+use config::Config;
+
 mod dto;
 use dto::*;
 
@@ -16,14 +19,15 @@ extern crate clap;
 use clap::{App, Arg};
 
 use log::{error, info, LevelFilter};
+use simplelog::{CombinedLogger, SharedLogger, TermLogger, TerminalMode, WriteLogger};
+use std::fs::File;
+
 use url::Url;
 
 use futures::prelude::*;
 use tokio::net::{TcpListener, UnixListener};
 use tokio_serde::formats::*;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-
-use serde_derive::Deserialize;
 
 /// Spawns a TCP server and listens for incoming connections.
 /// The TCP server accept framed json messages and dispatches them to the individual command handlers.
@@ -153,15 +157,6 @@ unsafe fn get_gid_by_name(name: &str) -> Option<libc::gid_t> {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-#[derive(Clone, Debug, Deserialize)]
-pub struct Config {
-    verbosity: Option<String>,
-    pid_file: Option<String>,
-    log_file: Option<String>,
-    socket_addr: String,
-}
-
 pub struct PidFile {
     _fd: i32,
 }
@@ -209,7 +204,19 @@ async fn main() -> Result<()> {
                 .required(false)
                 .default_value(CONFIG_FILE),
         )
+        .arg(
+            Arg::with_name("elevate")
+                .short("E")
+                .long("elevate")
+                .help("elevate privileges upon start")
+                .takes_value(false)
+                .required(false),
+        )
         .get_matches();
+
+    if matches.occurrences_of("elevate") > 0 {
+        sudo::escalate_if_needed().expect("failed to elevate privileges");
+    }
 
     // load config
     let config_path = matches.value_of("config").unwrap();
@@ -230,15 +237,34 @@ async fn main() -> Result<()> {
         _ => LevelFilter::Trace,
     };
 
+    // set console verbosity
+    let console_log_filter = match matches.occurrences_of("verbose") {
+        0 => log_filter,
+        1 => LevelFilter::Error,
+        2 => LevelFilter::Warn,
+        3 => LevelFilter::Info,
+        4 => LevelFilter::Debug,
+        _ => LevelFilter::Trace,
+    };
+
     // setup logging
+    let mut loggers: Vec<Box<dyn SharedLogger>> = vec![TermLogger::new(
+        console_log_filter,
+        simplelog::Config::default(),
+        TerminalMode::Mixed,
+    )];
+
     if let Some(log_file) = config.log_file {
-        simple_logging::log_to_file(log_file, log_filter).unwrap();
-    } else {
-        simple_logger::SimpleLogger::new()
-            .with_level(log_filter)
-            .init()
-            .unwrap();
+        let log_file = File::create(log_file)
+            .expect("Unable to create log file. Insufficent privileges? (rerun with -E");
+        loggers.push(WriteLogger::new(
+            log_filter,
+            simplelog::Config::default(),
+            log_file,
+        ));
     }
+
+    let _ = CombinedLogger::init(loggers);
 
     // instantiate pid file
     let _pid_file = PidFile::new(
@@ -246,7 +272,7 @@ async fn main() -> Result<()> {
             .pid_file
             .unwrap_or_else(|| "/var/run/memflow.pid".to_string()),
     )
-    .unwrap();
+    .expect("Failed to create PID file. Insufficent privileges? (rerun with -E)");
 
     // setup the listening socket
     let url =
