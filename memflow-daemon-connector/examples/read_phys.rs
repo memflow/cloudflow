@@ -22,6 +22,13 @@ fn main() {
                 .takes_value(true)
                 .required(true),
         )
+        .arg(
+            Arg::with_name("id")
+                .short("id")
+                .long("id")
+                .takes_value(true)
+                .required(true),
+        )
         .get_matches();
 
     simple_logger::SimpleLogger::new()
@@ -30,7 +37,9 @@ fn main() {
         .unwrap();
 
     let host = matches.value_of("host").unwrap();
-    let args = ConnectorArgs::parse(host).unwrap();
+    let id = matches.value_of("id").unwrap();
+    let args = ConnectorArgs::parse(&(host.to_owned() + ",id=" + id + ",host=" + host)).unwrap();
+    println!("{:#?}", args);
     let mut conn = match memflow_daemon_connector::create_connector(&args) {
         Ok(br) => br,
         Err(e) => {

@@ -47,7 +47,7 @@ fn main() {
         .subcommand(commands::proc::command_definition())
         .subcommand(commands::gdb::command_definition());
     #[cfg(not(target_os = "windows"))]
-    app.subcommand(commands::fuse::command_definition());
+    let mut app = app.subcommand(commands::fuse::command_definition());
 
     let matches = app.clone().get_matches();
 

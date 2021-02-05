@@ -11,7 +11,7 @@ use tokio_serde::{formats::Json, SymmetricallyFramed};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 use memflow::*;
-use memflow_daemon::{request, response};
+use memflow_daemon::{config, request, response};
 use memflow_derive::connector;
 
 // framed udp read/write pairs
@@ -102,13 +102,17 @@ async fn connect_tcp(addr: &str) -> Result<FramedStream> {
         .map_err(|_| Error::Other("unable to connect to tcp socket"))?;
     let (reader, writer) = socket.into_split();
 
-    let framed_writer = FramedWrite::new(writer, LengthDelimitedCodec::new());
+    let mut delimiter_codec = LengthDelimitedCodec::new();
+    delimiter_codec.set_max_frame_length(config::MAX_FRAME_LENGTH);
+    let framed_writer = FramedWrite::new(writer, delimiter_codec);
     let serializer = tokio_serde::SymmetricallyFramed::new(
         framed_writer,
         SymmetricalJson::<request::Message>::default(),
     );
 
-    let framed_reader = FramedRead::new(reader, LengthDelimitedCodec::new());
+    let mut delimiter_codec = LengthDelimitedCodec::new();
+    delimiter_codec.set_max_frame_length(config::MAX_FRAME_LENGTH);
+    let framed_reader = FramedRead::new(reader, delimiter_codec);
     let deserializer = tokio_serde::SymmetricallyFramed::new(
         framed_reader,
         SymmetricalJson::<response::Message>::default(),
@@ -117,7 +121,6 @@ async fn connect_tcp(addr: &str) -> Result<FramedStream> {
     Ok(FramedStream::Tcp((serializer, deserializer)))
 }
 
-#[cfg(not(target_os = "windows"))]
 async fn connect_uds(addr: &str) -> Result<FramedStream> {
     println!("trying to open connection to {}", addr);
     let socket = UnixStream::connect(addr)
@@ -125,13 +128,17 @@ async fn connect_uds(addr: &str) -> Result<FramedStream> {
         .map_err(|_| Error::Other("unable to connect to udp socket"))?;
     let (reader, writer) = socket.into_split();
 
-    let framed_writer = FramedWrite::new(writer, LengthDelimitedCodec::new());
+    let mut delimiter_codec = LengthDelimitedCodec::new();
+    delimiter_codec.set_max_frame_length(config::MAX_FRAME_LENGTH);
+    let framed_writer = FramedWrite::new(writer, delimiter_codec);
     let serializer = tokio_serde::SymmetricallyFramed::new(
         framed_writer,
         SymmetricalJson::<request::Message>::default(),
     );
 
-    let framed_reader = FramedRead::new(reader, LengthDelimitedCodec::new());
+    let mut delimiter_codec = LengthDelimitedCodec::new();
+    delimiter_codec.set_max_frame_length(config::MAX_FRAME_LENGTH);
+    let framed_reader = FramedRead::new(reader, delimiter_codec);
     let deserializer = tokio_serde::SymmetricallyFramed::new(
         framed_reader,
         SymmetricalJson::<response::Message>::default(),
@@ -177,7 +184,7 @@ impl DaemonConnector {
             .map_err(|_| Error::Other("unable to get phys_mem metadata from daemon"))?;
 
         Ok(Self {
-            addr: String::new(),
+            addr: addr.to_string(),
             conn_id: conn_id.to_string(),
 
             runtime: rt,
@@ -246,7 +253,9 @@ async fn phys_read_raw_list_batch(
         })?;
 
     // wait for reply
-    if let Ok(msg) = stream.try_next().await {
+    let response = stream.try_next().await;
+    match response {
+        Ok(msg) =>
         match msg {
             response::Message::PhysicalMemoryRead(msg) => {
                 //d.1.clone_from_slice(msg.data.as_slice());
@@ -265,8 +274,9 @@ async fn phys_read_raw_list_batch(
                 info!("invalid message received");
                 return Err(Error::Other("invalid message received"));
             }
-        }
-    }
+        },
+        Err(e) => panic!("{}", e.to_str()),
+    };
 
     Ok(())
 }
