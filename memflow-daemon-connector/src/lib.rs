@@ -2,7 +2,9 @@ use log::{error, info};
 use url::Url;
 
 use futures::prelude::*;
-use tokio::net::{tcp, unix, TcpStream, UnixStream};
+use tokio::net::{tcp, TcpStream};
+#[cfg(not(target_os = "windows"))]
+use tokio::net::{unix, UnixStream};
 use tokio::runtime::Runtime;
 use tokio_serde::formats::*;
 use tokio_serde::{formats::Json, SymmetricallyFramed};
@@ -13,11 +15,13 @@ use memflow_daemon::{request, response};
 use memflow_derive::connector;
 
 // framed udp read/write pairs
+#[cfg(not(target_os = "windows"))]
 type FramedUdsRequestWriter = SymmetricallyFramed<
     FramedWrite<unix::OwnedWriteHalf, LengthDelimitedCodec>,
     request::Message,
     Json<request::Message, request::Message>,
 >;
+#[cfg(not(target_os = "windows"))]
 type FramedUdsResponseReader = SymmetricallyFramed<
     FramedRead<unix::OwnedReadHalf, LengthDelimitedCodec>,
     response::Message,
@@ -38,6 +42,7 @@ type FramedTcpResponseReader = SymmetricallyFramed<
 
 /// A read/write framed pair for a stream.
 enum FramedStream {
+    #[cfg(not(target_os = "windows"))]
     Uds((FramedUdsRequestWriter, FramedUdsResponseReader)),
     Tcp((FramedTcpRequestWriter, FramedTcpResponseReader)),
 }
@@ -45,6 +50,7 @@ enum FramedStream {
 impl FramedStream {
     pub async fn send(&mut self, item: request::Message) -> Result<()> {
         match self {
+            #[cfg(not(target_os = "windows"))]
             FramedStream::Uds((writer, _)) => writer.send(item).await.map_err(|e| {
                 error!("{}", e);
                 Error::IO("unable to send message")
@@ -58,6 +64,7 @@ impl FramedStream {
 
     pub async fn try_next(&mut self) -> Result<response::Message> {
         match self {
+            #[cfg(not(target_os = "windows"))]
             FramedStream::Uds((_, reader)) => reader
                 .try_next()
                 .await
@@ -110,6 +117,7 @@ async fn connect_tcp(addr: &str) -> Result<FramedStream> {
     Ok(FramedStream::Tcp((serializer, deserializer)))
 }
 
+#[cfg(not(target_os = "windows"))]
 async fn connect_uds(addr: &str) -> Result<FramedStream> {
     println!("trying to open connection to {}", addr);
     let socket = UnixStream::connect(addr)
@@ -152,6 +160,7 @@ impl DaemonConnector {
                     return Err(Error::Other("invalid tcp host address"));
                 }
             }
+            #[cfg(not(target_os = "windows"))]
             "unix" => {
                 if let Ok(path) = url.to_file_path() {
                     rt.block_on(connect_uds(&format!("{}", path.to_string_lossy())))?
@@ -159,7 +168,7 @@ impl DaemonConnector {
                     return Err(Error::Other("invalid unix domain socket path"));
                 }
             }
-            _ => return Err(Error::Other("only unix and tcp urls are supported")),
+            _ => return Err(Error::Other("only tcp and unix (not on Windows) urls are supported")),
         };
 
         // read metadata

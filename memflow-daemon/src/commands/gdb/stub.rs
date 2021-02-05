@@ -99,8 +99,9 @@ fn gdb_wait_for_connection(addr: &str, mut stub: GdbStubx64) -> Result<()> {
                 return Err(Error::Other("invalid tcp host"));
             }
         }
+        #[cfg(not(target_os = "windows"))]
         "unix" => Box::new(wait_for_uds(url.path())?),
-        _ => return Err(Error::Other("only tcp and unix urls are supported")),
+        _ => return Err(Error::Other("only tcp and unix (not on Windows) urls are supported")),
     };
 
     // hook-up debugger

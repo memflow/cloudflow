@@ -1,7 +1,7 @@
 pub mod connection;
 pub mod proc;
 
-// TODO: only on linux
+#[cfg(not(target_os = "windows"))]
 pub mod fuse;
 
 pub mod gdb;

@@ -1,6 +1,5 @@
 use serde_derive::Deserialize;
 
-#[cfg(not(target_os = "windows"))]
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     pub verbosity: Option<String>,

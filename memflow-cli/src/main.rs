@@ -12,6 +12,8 @@ use log::Level;
 
 #[cfg(not(target_os = "windows"))]
 const CONFIG_FILE: &str = "/etc/memflow/daemon.conf";
+#[cfg(target_os = "windows")]
+const CONFIG_FILE: &str = "daemon.conf";
 
 pub struct Config {
     pub host: String,
@@ -42,9 +44,10 @@ fn main() {
                 .default_value(CONFIG_FILE),
         )
         .subcommand(commands::connection::command_definition())
-        .subcommand(commands::fuse::command_definition())
         .subcommand(commands::proc::command_definition())
         .subcommand(commands::gdb::command_definition());
+    #[cfg(not(target_os = "windows"))]
+    app.subcommand(commands::fuse::command_definition());
 
     let matches = app.clone().get_matches();
 
@@ -74,6 +77,7 @@ fn main() {
         (commands::connection::COMMAND_STR, Some(subargv)) => {
             commands::connection::handle_command(&conf, subargv)
         }
+        #[cfg(not(target_os = "windows"))]
         (commands::fuse::COMMAND_STR, Some(subargv)) => {
             commands::fuse::handle_command(&conf, subargv)
         }

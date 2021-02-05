@@ -1,36 +1,55 @@
 mod error;
 use error::{Error, Result};
 
+#[cfg(not(target_os = "windows"))]
 mod config;
+#[cfg(not(target_os = "windows"))]
 use config::Config;
 
+#[cfg(not(target_os = "windows"))]
 mod dto;
+#[cfg(not(target_os = "windows"))]
 use dto::*;
 
+#[cfg(not(target_os = "windows"))]
 mod state;
 
+#[cfg(not(target_os = "windows"))]
 mod commands;
+#[cfg(not(target_os = "windows"))]
 mod dispatch;
 
+#[cfg(not(target_os = "windows"))]
 use std::ffi::CString;
 
+#[cfg(not(target_os = "windows"))]
 #[macro_use]
 extern crate clap;
+#[cfg(not(target_os = "windows"))]
 use clap::{App, Arg};
 
 use log::{LevelFilter, error, info};
+#[cfg(not(target_os = "windows"))]
+#[cfg(not(target_os = "windows"))]
 use simplelog::{CombinedLogger, SharedLogger, TermLogger, TerminalMode, WriteLogger};
+#[cfg(not(target_os = "windows"))]
 use std::fs::File;
 
+#[cfg(not(target_os = "windows"))]
 use url::Url;
 
+#[cfg(not(target_os = "windows"))]
 use futures::prelude::*;
+#[cfg(not(target_os = "windows"))]
 use tokio::net::{TcpListener, UnixListener};
+#[cfg(not(target_os = "windows"))]
 use tokio_serde::formats::*;
+#[cfg(not(target_os = "windows"))]
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 /// Spawns a TCP server and listens for incoming connections.
 /// The TCP server accept framed json messages and dispatches them to the individual command handlers.
+#[cfg(not(target_os = "windows"))]
 async fn run_server_tcp(addr: &str) -> Result<()> {
     let mut listener = TcpListener::bind(addr).map_err(|_| Error::IO).await?;
 
@@ -76,6 +95,7 @@ async fn run_server_tcp(addr: &str) -> Result<()> {
 }
 
 /// This function accepts a `request::Message` and dispatches it to the appropiate command handler.
+#[cfg(not(target_os = "windows"))]
 async fn handle_message<S: Sink<response::Message> + Unpin>(
     frame: &mut S,
     msg: request::Message,
@@ -165,9 +185,10 @@ pub struct PidFile {
     _fd: i32,
 }
 
+#[cfg(not(target_os = "windows"))]
 impl PidFile {
     pub fn new(path: &str) -> Result<Self> {
-        let cpath = CString::new(path).map_err(|_| Error::Other("unable o convert path"))?;
+        let cpath = CString::new(path).map_err(|_| Error::Other("unable to convert path"))?;
 
         let fd = unsafe {
             let fd = libc::open(cpath.as_ptr(), libc::O_WRONLY | libc::O_CREAT, 0o666);
@@ -188,6 +209,11 @@ impl PidFile {
 
         Ok(Self { _fd: fd })
     }
+}
+
+#[cfg(target_os = "windows")]
+fn main() {
+    panic!("Windows not supported!")
 }
 
 #[cfg(not(target_os = "windows"))]

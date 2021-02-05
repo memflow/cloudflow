@@ -5,7 +5,9 @@ use log::{debug, error, info, warn};
 use url::Url;
 
 use futures::prelude::*;
-use tokio::net::{TcpStream, UnixStream};
+use tokio::net::TcpStream;
+#[cfg(not(target_os = "windows"))]
+use tokio::net::UnixStream;
 use tokio_serde::formats::*;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
@@ -29,8 +31,9 @@ async fn dispatch_async(conf: &Config, req: request::Message) -> Result<()> {
                 Err(Error::Other("invalid tcp host address"))
             }
         }
+        #[cfg(not(target_os = "windows"))]
         "unix" => dispatch_async_uds(url.path(), req).await,
-        _ => Err(Error::Other("only tcp and unix urls are supported")),
+        _ => Err(Error::Other("only tcp and unix (not on Windows) urls are supported")),
     }
 }
 
