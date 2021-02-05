@@ -3,11 +3,11 @@
 use crate::dto::response;
 use crate::error::{Error, Result};
 
-use log::Level;
+use log::{Level, error};
 
 use futures::prelude::*;
 use futures::Sink;
-use std::marker::Unpin;
+use std::{fmt::Display, marker::Unpin};
 
 pub async fn send_log_debug<S: Sink<response::Message> + Unpin>(
     frame: &mut S,
@@ -74,13 +74,17 @@ pub async fn send_table<S: Sink<response::Message> + Unpin>(
 pub async fn send_phys_mem_read<S: Sink<response::Message> + Unpin>(
     frame: &mut S,
     reads: Vec<response::PhysicalMemoryReadEntry>,
-) -> Result<()> {
+) -> Result<()>
+where S::Error: std::error::Error  {
     frame
         .send(response::Message::PhysicalMemoryRead(
             response::PhysicalMemoryRead { reads },
         ))
         .await
-        .map_err(|_| Error::IO)
+        .map_err(|e| {
+            let e_str = format!("{}", e);
+            Error::IO
+        })
 }
 
 pub async fn send_phys_mem_metadata<S: Sink<response::Message> + Unpin>(

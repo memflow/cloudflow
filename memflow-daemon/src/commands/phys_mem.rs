@@ -12,7 +12,7 @@ use memflow::*;
 pub async fn read<S: Sink<response::Message> + Unpin>(
     frame: &mut S,
     msg: request::ReadPhysicalMemory,
-) -> Result<()> {
+) -> Result<()> where S::Error: std::error::Error {
     let mut state = STATE.lock().await;
     if let Some(conn) = state.connection_mut(&msg.conn_id) {
         match &mut conn.kernel {

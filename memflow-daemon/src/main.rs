@@ -18,7 +18,7 @@ use std::ffi::CString;
 extern crate clap;
 use clap::{App, Arg};
 
-use log::{error, info, LevelFilter};
+use log::{LevelFilter, error, info};
 use simplelog::{CombinedLogger, SharedLogger, TermLogger, TerminalMode, WriteLogger};
 use std::fs::File;
 
@@ -41,13 +41,17 @@ async fn run_server_tcp(addr: &str) -> Result<()> {
                 tokio::spawn(async move {
                     let (reader, writer) = stream.split();
 
-                    let framed_reader = FramedRead::new(reader, LengthDelimitedCodec::new());
+                    let mut delimiter_codec = LengthDelimitedCodec::new();
+                    delimiter_codec.set_max_frame_length(config::MAX_FRAME_LENGTH);
+                    let framed_reader = FramedRead::new(reader, delimiter_codec);
                     let mut deserializer = tokio_serde::SymmetricallyFramed::new(
                         framed_reader,
                         SymmetricalJson::<request::Message>::default(),
                     );
 
-                    let framed_writer = FramedWrite::new(writer, LengthDelimitedCodec::new());
+                    let mut delimiter_codec = LengthDelimitedCodec::new();
+                    delimiter_codec.set_max_frame_length(config::MAX_FRAME_LENGTH);
+                    let framed_writer = FramedWrite::new(writer, delimiter_codec);
                     let mut serializer = tokio_serde::SymmetricallyFramed::new(
                         framed_writer,
                         SymmetricalJson::<response::Message>::default(),
@@ -75,7 +79,7 @@ async fn run_server_tcp(addr: &str) -> Result<()> {
 async fn handle_message<S: Sink<response::Message> + Unpin>(
     frame: &mut S,
     msg: request::Message,
-) -> Result<()> {
+) -> Result<()> where S::Error: std::error::Error {
     match msg {
         request::Message::Connect(msg) => {
             commands::connection::new(frame, msg)

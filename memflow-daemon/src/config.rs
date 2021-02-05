@@ -8,3 +8,6 @@ pub struct Config {
     pub log_file: Option<String>,
     pub socket_addr: String,
 }
+
+// set max to 1 GiB frames
+pub const MAX_FRAME_LENGTH: usize = 1 * 1024 * 1024 * 1024;
