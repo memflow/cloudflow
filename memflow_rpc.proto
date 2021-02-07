@@ -1,0 +1,209 @@
+syntax = "proto3";
+
+package memflow_rpc;
+
+service Memflow {
+    rpc NewConnection (NewConnectionRequest) returns (NewConnectionResponse);
+
+    rpc ListConnections (ListConnectionsRequest) returns (ListConnectionsResponse);
+
+    rpc CloseConnection (CloseConnectionRequest) returns (CloseConnectionResponse);
+
+    rpc ReadPhysicalMemory (ReadPhysicalMemoryRequest) returns (ReadPhysicalMemoryResponse);
+
+    rpc WritePhysicalMemory (WritePhysicalMemoryRequest) returns (WritePhysicalMemoryResponse);
+
+    rpc PhysicalMemoryMetadata (PhysicalMemoryMetadataRequest) returns (PhysicalMemoryMetadataResponse);
+
+    rpc ReadVirtualMemory (ReadVirtualMemoryRequest) returns (ReadVirtualMemoryResponse);
+
+    rpc WriteVirtualMemory (WriteVirtualMemoryRequest) returns (WriteVirtualMemoryResponse);
+
+    rpc ListProcesses (ListProcessesRequest) returns (ListProcessesResponse);
+
+    rpc ProcessInfo (ProcessInfoRequest) returns (ProcessInfoResponse);
+}
+
+// **************************************
+// NewConnection
+message NewConnectionRequest {
+    string name = 1;
+    string args = 2;
+    string alias = 3;
+}
+
+message NewConnectionResponse {
+    string conn_id = 1;
+}
+
+// **************************************
+// ListConnections
+message ListConnectionsRequest {
+}
+
+message ListConnectionsResponse {
+    repeated ConnectionDescription connections = 1;
+}
+
+message ConnectionDescription {
+    string conn_id = 1;
+    string name = 2;
+    string args = 3;
+    string alias = 4;
+    uint64 refcount = 5;
+}
+
+// **************************************
+// CloseConnection
+message CloseConnectionRequest {
+    string conn_id = 1;
+}
+
+message CloseConnectionResponse {
+}
+
+// **************************************
+// ReadPhysicalMemory
+message ReadPhysicalMemoryRequest {
+    string conn_id = 1;
+    repeated ReadPhysicalMemoryEntryRequest reads = 2;
+}
+
+message ReadPhysicalMemoryEntryRequest {
+    uint64 addr = 1;
+    uint64 len = 2;
+}
+
+message ReadPhysicalMemoryResponse {
+    repeated ReadPhysicalMemoryEntryResponse reads = 1;
+}
+
+message ReadPhysicalMemoryEntryResponse {
+    bytes data = 1;
+}
+
+// **************************************
+// WritePhysicalMemory
+message WritePhysicalMemoryRequest {
+    string conn_id = 1;
+    repeated WritePhysicalMemoryEntryRequest writes = 2;
+}
+
+message WritePhysicalMemoryEntryRequest {
+    uint64 addr = 1;
+    bytes data = 2;
+}
+
+message WritePhysicalMemoryResponse {
+}
+
+// **************************************
+// PhysicalMemoryMetadata
+message PhysicalMemoryMetadataRequest {
+    string conn_id = 1;
+}
+
+message PhysicalMemoryMetadataResponse {
+    PhysicalMemoryMetadata metadata = 1;
+}
+
+message PhysicalMemoryMetadata {
+    uint64 size = 1;
+    bool readonly = 2;
+}
+
+// **************************************
+// ReadVirtualMemory
+message ReadVirtualMemoryRequest {
+    string conn_id = 1;
+    uint32 pid = 2;
+    // Virtual addresses are offsets for the base address of the process
+    bool base_offsets = 3;
+    repeated ReadVirtualMemoryEntryRequest reads = 4;
+}
+
+message ReadVirtualMemoryEntryRequest {
+    uint64 addr = 1;
+    uint64 len = 2;
+}
+
+message ReadVirtualMemoryResponse {
+    repeated ReadVirtualMemoryEntryResponse reads = 1;
+}
+
+message ReadVirtualMemoryEntryResponse {
+    bytes data = 1;
+}
+
+// **************************************
+// WriteVirtualMemory
+message WriteVirtualMemoryRequest {
+    string conn_id = 1;
+    uint32 pid = 2;
+    // Virtual addresses are offsets for the base address of the process
+    bool base_offsets = 3;
+    repeated WriteVirtualMemoryEntryRequest writes = 4;
+}
+
+message WriteVirtualMemoryEntryRequest {
+    uint64 addr = 1;
+    bytes data = 2;
+}
+
+message WriteVirtualMemoryResponse {
+}
+
+// **************************************
+// ListProcesses
+message ListProcessesRequest {
+    string conn_id = 1;
+}
+
+message ListProcessesResponse {
+    repeated Win32ProcessInfo processes = 1;
+}
+
+// **************************************
+// ProcessInfo
+message ProcessInfoRequest {
+    string conn_id = 1;
+    uint32 pid = 2;
+}
+
+message ProcessInfoResponse {
+    Win32ProcessInfo process = 1;
+    repeated Win32ModuleInfo modules = 2;
+}
+
+// Shared types
+message Win32ProcessInfo {
+    uint64 address = 1;
+
+    uint32 pid = 2;
+    string name = 3;
+    uint64 dtb = 4;
+    uint64 section_base = 5;
+    int32 exit_status = 6;
+    uint64 ethread = 7;
+    uint64 wow64 = 8;
+
+    uint64 teb = 9;
+    uint64 teb_wow64 = 10;
+
+    uint64 peb_native = 11;
+    uint64 peb_wow64 = 12;
+
+    uint32 proc_pointer_bits = 13;
+    uint32 arch_pointer_bits = 14;
+    bool is_wow64 = 15;
+}
+
+message Win32ModuleInfo {
+    uint64 peb_entry = 1;
+    uint64 parent_eprocess = 2;
+
+    uint64 base = 3;
+    uint64 size = 4;
+    string path = 5;
+    string name = 6;
+}

@@ -1,7 +1,8 @@
 pub mod connection;
 pub mod proc;
+pub mod benchmark;
 
-#[cfg(not(target_os = "windows"))]
-pub mod fuse;
+// TODO
+//pub mod fuse;
 
-pub mod gdb;
+//pub mod gdb;

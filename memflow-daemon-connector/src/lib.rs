@@ -1,194 +1,55 @@
-use log::{error, info};
-use url::Url;
+use memflow_client;
 
-use futures::prelude::*;
-use tokio::net::{tcp, TcpStream};
-#[cfg(not(target_os = "windows"))]
-use tokio::net::{unix, UnixStream};
-use tokio::runtime::Runtime;
-use tokio_serde::formats::*;
-use tokio_serde::{formats::Json, SymmetricallyFramed};
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use log::error;
 
-use memflow::*;
-use memflow_daemon::{config, request, response};
+use memflow::{
+    ConnectorArgs, Error, PhysicalMemory, PhysicalMemoryMetadata, PhysicalReadData,
+    PhysicalWriteData, Result,
+};
 use memflow_derive::connector;
-
-// framed udp read/write pairs
-#[cfg(not(target_os = "windows"))]
-type FramedUdsRequestWriter = SymmetricallyFramed<
-    FramedWrite<unix::OwnedWriteHalf, LengthDelimitedCodec>,
-    request::Message,
-    Json<request::Message, request::Message>,
->;
-#[cfg(not(target_os = "windows"))]
-type FramedUdsResponseReader = SymmetricallyFramed<
-    FramedRead<unix::OwnedReadHalf, LengthDelimitedCodec>,
-    response::Message,
-    Json<response::Message, response::Message>,
->;
-
-// framed tcp read/write pairs
-type FramedTcpRequestWriter = SymmetricallyFramed<
-    FramedWrite<tcp::OwnedWriteHalf, LengthDelimitedCodec>,
-    request::Message,
-    Json<request::Message, request::Message>,
->;
-type FramedTcpResponseReader = SymmetricallyFramed<
-    FramedRead<tcp::OwnedReadHalf, LengthDelimitedCodec>,
-    response::Message,
-    Json<response::Message, response::Message>,
->;
-
-/// A read/write framed pair for a stream.
-enum FramedStream {
-    #[cfg(not(target_os = "windows"))]
-    Uds((FramedUdsRequestWriter, FramedUdsResponseReader)),
-    Tcp((FramedTcpRequestWriter, FramedTcpResponseReader)),
-}
-
-impl FramedStream {
-    pub async fn send(&mut self, item: request::Message) -> Result<()> {
-        match self {
-            #[cfg(not(target_os = "windows"))]
-            FramedStream::Uds((writer, _)) => writer.send(item).await.map_err(|e| {
-                error!("{}", e);
-                Error::IO("unable to send message")
-            }),
-            FramedStream::Tcp((writer, _)) => writer.send(item).await.map_err(|e| {
-                error!("{}", e);
-                Error::IO("unable to send message")
-            }),
-        }
-    }
-
-    pub async fn try_next(&mut self) -> Result<response::Message> {
-        match self {
-            #[cfg(not(target_os = "windows"))]
-            FramedStream::Uds((_, reader)) => reader
-                .try_next()
-                .await
-                .map_err(|e| {
-                    error!("{}", e);
-                    Error::IO("unable to read read message")
-                })?
-                .ok_or_else(|| Error::IO("no more messages")),
-            FramedStream::Tcp((_, reader)) => reader
-                .try_next()
-                .await
-                .map_err(|e| {
-                    error!("{}", e);
-                    Error::IO("unable to read read message")
-                })?
-                .ok_or_else(|| Error::IO("no more messages")),
-        }
-    }
-}
+use tokio::runtime::Runtime;
 
 pub struct DaemonConnector {
     addr: String,
     conn_id: String,
 
     runtime: Runtime,
-    stream: FramedStream,
+    client: memflow_client::dispatch::Client,
+    conf: memflow_client::dispatch::Config,
 
-    metadata: PhysicalMemoryMetadata,
-}
-
-async fn connect_tcp(addr: &str) -> Result<FramedStream> {
-    info!("trying to open connection to {}", addr);
-    let socket = TcpStream::connect(addr)
-        .await
-        .map_err(|_| Error::Other("unable to connect to tcp socket"))?;
-    let (reader, writer) = socket.into_split();
-
-    let mut delimiter_codec = LengthDelimitedCodec::new();
-    delimiter_codec.set_max_frame_length(config::MAX_FRAME_LENGTH);
-    let framed_writer = FramedWrite::new(writer, delimiter_codec);
-    let serializer = tokio_serde::SymmetricallyFramed::new(
-        framed_writer,
-        SymmetricalJson::<request::Message>::default(),
-    );
-
-    let mut delimiter_codec = LengthDelimitedCodec::new();
-    delimiter_codec.set_max_frame_length(config::MAX_FRAME_LENGTH);
-    let framed_reader = FramedRead::new(reader, delimiter_codec);
-    let deserializer = tokio_serde::SymmetricallyFramed::new(
-        framed_reader,
-        SymmetricalJson::<response::Message>::default(),
-    );
-
-    Ok(FramedStream::Tcp((serializer, deserializer)))
-}
-
-async fn connect_uds(addr: &str) -> Result<FramedStream> {
-    println!("trying to open connection to {}", addr);
-    let socket = UnixStream::connect(addr)
-        .await
-        .map_err(|_| Error::Other("unable to connect to udp socket"))?;
-    let (reader, writer) = socket.into_split();
-
-    let mut delimiter_codec = LengthDelimitedCodec::new();
-    delimiter_codec.set_max_frame_length(config::MAX_FRAME_LENGTH);
-    let framed_writer = FramedWrite::new(writer, delimiter_codec);
-    let serializer = tokio_serde::SymmetricallyFramed::new(
-        framed_writer,
-        SymmetricalJson::<request::Message>::default(),
-    );
-
-    let mut delimiter_codec = LengthDelimitedCodec::new();
-    delimiter_codec.set_max_frame_length(config::MAX_FRAME_LENGTH);
-    let framed_reader = FramedRead::new(reader, delimiter_codec);
-    let deserializer = tokio_serde::SymmetricallyFramed::new(
-        framed_reader,
-        SymmetricalJson::<response::Message>::default(),
-    );
-
-    Ok(FramedStream::Uds((serializer, deserializer)))
+    metadata: memflow_daemon::memflow_rpc::PhysicalMemoryMetadata,
 }
 
 impl DaemonConnector {
     pub fn new(addr: &str, conn_id: &str) -> Result<Self> {
-        let rt = tokio::runtime::Runtime::new().map_err(|e| {
+        let conf = memflow_client::dispatch::Config { host: addr.into() };
+
+        let rt = Runtime::new().map_err(|e| {
             error!("{}", e);
             Error::Other("unable to instantiate tokio runtime")
         })?;
 
-        let url = Url::parse(addr).map_err(|_| Error::Other("invalid socket address"))?;
-        let mut stream = match url.scheme() {
-            "tcp" => {
-                if let Some(host_str) = url.host_str() {
-                    rt.block_on(connect_tcp(&format!(
-                        "{}:{}",
-                        host_str,
-                        url.port().unwrap_or(8000)
-                    )))?
-                } else {
-                    return Err(Error::Other("invalid tcp host address"));
-                }
-            }
-            #[cfg(not(target_os = "windows"))]
-            "unix" => {
-                if let Ok(path) = url.to_file_path() {
-                    rt.block_on(connect_uds(&format!("{}", path.to_string_lossy())))?
-                } else {
-                    return Err(Error::Other("invalid unix domain socket path"));
-                }
-            }
-            _ => return Err(Error::Other("only tcp and unix (not on Windows) urls are supported")),
-        };
+        let mut client: memflow_client::dispatch::Client = rt.block_on(memflow_client::dispatch::create_client_async(&conf));
 
-        // read metadata
         let metadata = rt
-            .block_on(phys_metadata(&mut stream, conn_id))
-            .map_err(|_| Error::Other("unable to get phys_mem metadata from daemon"))?;
+            .block_on(memflow_client::dispatch::dispatch_request_async_client(
+                &conf,
+                memflow_daemon::memflow_rpc::PhysicalMemoryMetadataRequest {
+                    conn_id: conn_id.into(),
+                },
+                &mut client,
+            ))
+            .expect("Failed to get memory metadata")
+            .metadata
+            .expect("Received no metadata");
 
         Ok(Self {
             addr: addr.to_string(),
             conn_id: conn_id.to_string(),
 
             runtime: rt,
-            stream,
+            client,
+            conf,
 
             metadata,
         })
@@ -201,206 +62,67 @@ impl Clone for DaemonConnector {
     }
 }
 
-async fn phys_read_raw_list(
-    stream: &mut FramedStream,
-    conn_id: &str,
-    data: &mut [PhysicalReadData<'_>],
-) -> Result<()> {
-    let mut batch = Vec::new();
-    let mut bytes_requested = 0usize;
-    for d in data.iter_mut() {
-        bytes_requested += d.1.len();
-        batch.push(d);
-        if bytes_requested >= size::mb(1) {
-            phys_read_raw_list_batch(stream, conn_id, batch.as_mut_slice()).await?;
-            bytes_requested = 0;
-            batch.clear();
-        }
-    }
-
-    if !batch.is_empty() {
-        phys_read_raw_list_batch(stream, conn_id, batch.as_mut_slice()).await?;
-    }
-
-    Ok(())
-}
-
-async fn phys_read_raw_list_batch(
-    stream: &mut FramedStream,
-    conn_id: &str,
-    data: &mut [&mut PhysicalReadData<'_>],
-) -> Result<()> {
-    let mut reads = Vec::new();
-    for d in data.iter() {
-        reads.push(request::ReadPhysicalMemoryEntry {
-            addr: d.0,
-            len: d.1.len(),
-        });
-    }
-
-    // send request
-    stream
-        .send(request::Message::ReadPhysicalMemory(
-            request::ReadPhysicalMemory {
-                conn_id: conn_id.to_string(),
-                reads,
-            },
-        ))
-        .await
-        .map_err(|e| {
-            error!("{}", e);
-            Error::IO("unable to send physical read request")
-        })?;
-
-    // wait for reply
-    let response = stream.try_next().await;
-    match response {
-        Ok(msg) =>
-        match msg {
-            response::Message::PhysicalMemoryRead(msg) => {
-                //d.1.clone_from_slice(msg.data.as_slice());
-                for read in msg.reads.iter().zip(data.iter_mut()) {
-                    (read.1).1.clone_from_slice(read.0.data.as_slice());
-                }
-            }
-            response::Message::Result(msg) => {
-                if !msg.success {
-                    // TODO: continue batch on error
-                    info!("failure received: {}", msg.msg);
-                    return Err(Error::Other("failure received"));
-                }
-            }
-            _ => {
-                info!("invalid message received");
-                return Err(Error::Other("invalid message received"));
-            }
-        },
-        Err(e) => panic!("{}", e.to_str()),
-    };
-
-    Ok(())
-}
-
-async fn phys_write_raw_list(
-    stream: &mut FramedStream,
-    conn_id: &str,
-    data: &[PhysicalWriteData<'_>],
-) -> Result<()> {
-    let mut batch = Vec::new();
-    let mut bytes_requested = 0usize;
-    for d in data.iter() {
-        bytes_requested += d.1.len();
-        batch.push(d);
-        if bytes_requested >= size::mb(1) {
-            phys_write_raw_list_batch(stream, conn_id, batch.as_mut_slice()).await?;
-            bytes_requested = 0;
-            batch.clear();
-        }
-    }
-
-    if !batch.is_empty() {
-        phys_write_raw_list_batch(stream, conn_id, batch.as_mut_slice()).await?;
-    }
-
-    Ok(())
-}
-
-async fn phys_write_raw_list_batch(
-    stream: &mut FramedStream,
-    conn_id: &str,
-    data: &[&PhysicalWriteData<'_>],
-) -> Result<()> {
-    let mut writes = Vec::new();
-    for d in data.iter() {
-        writes.push(request::WritePhysicalMemoryEntry {
-            addr: d.0,
-            data: d.1.to_vec(),
-        });
-    }
-
-    // send request
-    stream
-        .send(request::Message::WritePhysicalMemory(
-            request::WritePhysicalMemory {
-                conn_id: conn_id.to_string(),
-                writes,
-            },
-        ))
-        .await
-        .map_err(|e| {
-            error!("{}", e);
-            Error::IO("unable to send physical write request")
-        })?;
-
-    // wait for reply
-    if let Ok(msg) = stream.try_next().await {
-        match msg {
-            response::Message::Result(msg) => {
-                if !msg.success {
-                    // TODO: continue batch on error
-                    info!("failure received: {}", msg.msg);
-                    return Err(Error::Other("failure received"));
-                }
-            }
-            _ => {
-                info!("invalid message received");
-                return Err(Error::Other("invalid message received"));
-            }
-        }
-    }
-
-    Ok(())
-}
-
-async fn phys_metadata(stream: &mut FramedStream, conn_id: &str) -> Result<PhysicalMemoryMetadata> {
-    // send request
-    stream
-        .send(request::Message::PhysicalMemoryMetadata(
-            request::PhysicalMemoryMetadata {
-                conn_id: conn_id.to_string(),
-            },
-        ))
-        .await
-        .map_err(|e| {
-            error!("{}", e);
-            Error::IO("unable to send metadata request")
-        })?;
-
-    // wait for reply
-    if let Ok(msg) = stream.try_next().await {
-        match msg {
-            response::Message::PhysicalMemoryMetadata(msg) => {
-                return Ok(msg.metadata);
-            }
-            response::Message::Result(msg) => {
-                if !msg.success {
-                    info!("failure received: {}", msg.msg);
-                    return Err(Error::Other("failure received"));
-                }
-            }
-            _ => {
-                info!("invalid message received");
-                return Err(Error::Other("invalid message received"));
-            }
-        }
-    }
-
-    Err(Error::Other("unable to receive metadata"))
-}
-
 impl PhysicalMemory for DaemonConnector {
     fn phys_read_raw_list(&mut self, data: &mut [PhysicalReadData]) -> Result<()> {
-        self.runtime
-            .block_on(phys_read_raw_list(&mut self.stream, &self.conn_id, data))
+        let mut reads = vec![];
+        for read in data.iter() {
+            reads.push(
+                memflow_daemon::memflow_rpc::ReadPhysicalMemoryEntryRequest {
+                    addr: read.0.as_u64(),
+                    len: read.1.len() as u64,
+                },
+            );
+        }
+        let request = memflow_daemon::memflow_rpc::ReadPhysicalMemoryRequest {
+            conn_id: self.conn_id.clone(),
+            reads: reads,
+        };
+        let response = self
+            .runtime
+            .block_on(memflow_client::dispatch::dispatch_request_async_client(
+                &self.conf,
+                request,
+                &mut self.client,
+            ))
+            .map_err(|_| Error::Other("Transfer error"))?;
+
+        for (data_out, read_in) in data.iter_mut().zip(response.reads.iter()) {
+            data_out.1.copy_from_slice(&read_in.data[..]);
+        }
+        Ok(())
     }
 
     fn phys_write_raw_list(&mut self, data: &[PhysicalWriteData]) -> Result<()> {
+        let mut writes = vec![];
+        for write in data {
+            writes.push(
+                memflow_daemon::memflow_rpc::WritePhysicalMemoryEntryRequest {
+                    addr: write.0.as_u64(),
+                    data: write.1.into(),
+                },
+            );
+        }
+        let request = memflow_daemon::memflow_rpc::WritePhysicalMemoryRequest {
+            conn_id: self.conn_id.clone(),
+            writes: writes,
+        };
+
         self.runtime
-            .block_on(phys_write_raw_list(&mut self.stream, &self.conn_id, data))
+            .block_on(memflow_client::dispatch::dispatch_request_async_client(
+                &self.conf,
+                request,
+                &mut self.client,
+            ))
+            .map_err(|_| Error::Other("Transfer error"))?;
+
+        Ok(())
     }
 
     fn metadata(&self) -> PhysicalMemoryMetadata {
-        self.metadata
+        PhysicalMemoryMetadata {
+            size: self.metadata.size as usize,
+            readonly: self.metadata.readonly,
+        }
     }
 }
 

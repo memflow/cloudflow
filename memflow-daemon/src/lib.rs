@@ -1,5 +1,8 @@
 pub mod config;
 pub use config::*;
 
-pub mod dto;
-pub use dto::*;
+pub mod error;
+
+pub mod memflow_rpc {
+    tonic::include_proto!("memflow_rpc");
+}

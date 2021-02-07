@@ -1,11 +1,9 @@
-use crate::dispatch::*;
+use memflow_client::dispatch::dispatch_request;
 use crate::Config;
 
 use clap::{App, ArgMatches, SubCommand};
 
-use log::trace;
-
-use memflow_daemon::request;
+use log::{error, trace};
 
 pub const COMMAND_STR: &str = "ls";
 
@@ -16,5 +14,10 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
 pub fn handle_command(conf: &Config, _matches: &ArgMatches) {
     trace!("handling command");
 
-    dispatch_request(conf, request::Message::ListConnections).unwrap();
+    let result = dispatch_request(conf, memflow_daemon::memflow_rpc::ListConnectionsRequest {});
+
+    match result {
+        Err(e) => error!("{:#?}", e),
+        Ok(r) => println!("{:#?}", r.connections),
+    }
 }

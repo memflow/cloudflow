@@ -1,183 +1,121 @@
+use std::{ffi::CString, fs::File};
+
+use clap::{crate_authors, crate_description, crate_name, crate_version, App, Arg};
+use log::LevelFilter;
+use memflow_daemon::Config;
+use memflow_rpc::memflow_server::{Memflow, MemflowServer};
+use memflow_rpc::{
+    CloseConnectionRequest, CloseConnectionResponse, ListConnectionsRequest,
+    ListConnectionsResponse, ListProcessesRequest, ListProcessesResponse, NewConnectionRequest,
+    NewConnectionResponse, PhysicalMemoryMetadataRequest, PhysicalMemoryMetadataResponse,
+    ProcessInfoRequest, ProcessInfoResponse, ReadPhysicalMemoryRequest, ReadPhysicalMemoryResponse,
+    ReadVirtualMemoryRequest, ReadVirtualMemoryResponse, WritePhysicalMemoryRequest,
+    WritePhysicalMemoryResponse, WriteVirtualMemoryRequest, WriteVirtualMemoryResponse,
+};
+use simplelog::{CombinedLogger, SharedLogger, TermLogger, TerminalMode, WriteLogger};
+use tonic::{transport::Server, Request, Response, Status};
+
+mod memflow_rpc {
+    tonic::include_proto!("memflow_rpc");
+}
+
 mod error;
 use error::{Error, Result};
 
-#[cfg(not(target_os = "windows"))]
 mod config;
-#[cfg(not(target_os = "windows"))]
-use config::Config;
 
-#[cfg(not(target_os = "windows"))]
-mod dto;
-#[cfg(not(target_os = "windows"))]
-use dto::*;
-
-#[cfg(not(target_os = "windows"))]
 mod state;
 
-#[cfg(not(target_os = "windows"))]
 mod commands;
-#[cfg(not(target_os = "windows"))]
-mod dispatch;
 
-#[cfg(not(target_os = "windows"))]
-use std::ffi::CString;
+fn map_to_tonic<T>(res: Result<T>) -> core::result::Result<tonic::Response<T>, Status> {
+    match res {
+        Ok(val) => Ok(tonic::Response::new(val)),
+        Err(err) => Err(Status::internal(format!("{:#?}", err))),
+    }
+}
 
-#[cfg(not(target_os = "windows"))]
-#[macro_use]
-extern crate clap;
-#[cfg(not(target_os = "windows"))]
-use clap::{App, Arg};
+// defining a struct for our service
+#[derive(Default)]
+pub struct MyMemflow {}
 
-use log::{LevelFilter, error, info};
-#[cfg(not(target_os = "windows"))]
-#[cfg(not(target_os = "windows"))]
-use simplelog::{CombinedLogger, SharedLogger, TermLogger, TerminalMode, WriteLogger};
-#[cfg(not(target_os = "windows"))]
-use std::fs::File;
+// implementing rpc for service defined in .proto
+#[tonic::async_trait]
+impl Memflow for MyMemflow {
+    // our rpc impelemented as function
+    async fn new_connection(
+        &self,
+        request: Request<NewConnectionRequest>,
+    ) -> core::result::Result<Response<NewConnectionResponse>, Status> {
+        let message = request.into_inner();
 
-#[cfg(not(target_os = "windows"))]
-use url::Url;
-
-#[cfg(not(target_os = "windows"))]
-use futures::prelude::*;
-#[cfg(not(target_os = "windows"))]
-use tokio::net::{TcpListener, UnixListener};
-#[cfg(not(target_os = "windows"))]
-use tokio_serde::formats::*;
-#[cfg(not(target_os = "windows"))]
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-
-/// Spawns a TCP server and listens for incoming connections.
-/// The TCP server accept framed json messages and dispatches them to the individual command handlers.
-#[cfg(not(target_os = "windows"))]
-async fn run_server_tcp(addr: &str) -> Result<()> {
-    let mut listener = TcpListener::bind(addr).map_err(|_| Error::IO).await?;
-
-    info!("listening for incoming connections");
-    while let Some(stream) = listener.next().await {
-        match stream {
-            Ok(mut stream) => {
-                tokio::spawn(async move {
-                    let (reader, writer) = stream.split();
-
-                    let mut delimiter_codec = LengthDelimitedCodec::new();
-                    delimiter_codec.set_max_frame_length(config::MAX_FRAME_LENGTH);
-                    let framed_reader = FramedRead::new(reader, delimiter_codec);
-                    let mut deserializer = tokio_serde::SymmetricallyFramed::new(
-                        framed_reader,
-                        SymmetricalJson::<request::Message>::default(),
-                    );
-
-                    let mut delimiter_codec = LengthDelimitedCodec::new();
-                    delimiter_codec.set_max_frame_length(config::MAX_FRAME_LENGTH);
-                    let framed_writer = FramedWrite::new(writer, delimiter_codec);
-                    let mut serializer = tokio_serde::SymmetricallyFramed::new(
-                        framed_writer,
-                        SymmetricalJson::<response::Message>::default(),
-                    );
-
-                    // currently a client is only supposed to send a single request
-                    while let Ok(msg_opt) = deserializer.try_next().await {
-                        if let Some(msg) = msg_opt {
-                            handle_message(&mut serializer, msg).await.ok();
-                        }
-                    }
-                });
-            }
-            Err(e) => {
-                error!("{}", e);
-                return Err(Error::Other("connection attempt failed"));
-            }
-        }
+        map_to_tonic(commands::connection::new(&message).await)
     }
 
-    Ok(())
-}
+    async fn list_connections(
+        &self,
+        request: Request<ListConnectionsRequest>,
+    ) -> core::result::Result<Response<ListConnectionsResponse>, Status> {
+        let message = request.into_inner();
+        map_to_tonic(commands::connection::ls(&message).await)
+    }
 
-/// This function accepts a `request::Message` and dispatches it to the appropiate command handler.
-#[cfg(not(target_os = "windows"))]
-async fn handle_message<S: Sink<response::Message> + Unpin>(
-    frame: &mut S,
-    msg: request::Message,
-) -> Result<()> where S::Error: std::error::Error {
-    match msg {
-        request::Message::Connect(msg) => {
-            commands::connection::new(frame, msg)
-                .await
-                .expect("failed to execute connection::new command");
-        }
-        request::Message::ListConnections => {
-            commands::connection::ls(frame)
-                .await
-                .expect("failed to execute connection::ls command");
-        }
-        request::Message::CloseConnection(msg) => {
-            commands::connection::rm(frame, msg)
-                .await
-                .expect("failed to execute connection::rm command");
-        }
+    async fn close_connection(
+        &self,
+        request: Request<CloseConnectionRequest>,
+    ) -> core::result::Result<Response<CloseConnectionResponse>, Status> {
+        let message = request.into_inner();
+        map_to_tonic(commands::connection::rm(&message).await)
+    }
 
-        request::Message::ReadPhysicalMemory(msg) => {
-            commands::phys_mem::read(frame, msg)
-                .await
-                .expect("failed to execute phys_mem::read command");
-        }
-        request::Message::WritePhysicalMemory(msg) => {
-            commands::phys_mem::write(frame, msg)
-                .await
-                .expect("failed to execute phys_mem::write command");
-        }
-        request::Message::PhysicalMemoryMetadata(msg) => {
-            commands::phys_mem::metadata(frame, msg)
-                .await
-                .expect("failed to execute phys_mem::metadata command");
-        }
-
-        // TODO: make os specific
-        request::Message::FuseMount(msg) => commands::fuse::mount(frame, msg)
-            .await
-            .expect("failed to execute fuse::mount command"),
-        request::Message::FuseListMounts => commands::fuse::ls(frame)
-            .await
-            .expect("failed to execute fuse::ls command"),
-
-        request::Message::GdbAttach(msg) => commands::gdb::attach(frame, msg)
-            .await
-            .expect("failed to execute gdb::attach command"),
-        request::Message::GdbList => commands::gdb::ls(frame)
-            .await
-            .expect("failed to execute gdb::ls command"),
-
-        request::Message::ListProcesses(msg) => {
-            commands::process::ls(frame, msg)
-                .await
-                .expect("failed to execute process::ls command");
-        }
-        request::Message::OpenProcess(_msg) => {
-            // TODO:
-        }
-    };
-    Ok(())
-}
-
-#[cfg(not(target_os = "windows"))]
-use libc::{chown, getgrnam};
-/// Linux & macOS program entry-point
-#[cfg(not(target_os = "windows"))]
-use std::os::unix::fs::PermissionsExt;
-
-#[cfg(not(target_os = "windows"))]
-const CONFIG_FILE: &str = "/etc/memflow/daemon.conf";
-
-#[cfg(not(target_os = "windows"))]
-unsafe fn get_gid_by_name(name: &str) -> Option<libc::gid_t> {
-    let namestr = CString::new(name).ok()?;
-    let ptr = getgrnam(namestr.as_ptr() as *const libc::c_char);
-    if ptr.is_null() {
-        None
-    } else {
-        let s = &*ptr;
-        Some(s.gr_gid)
+    async fn read_physical_memory(
+        &self,
+        request: Request<ReadPhysicalMemoryRequest>,
+    ) -> std::result::Result<Response<ReadPhysicalMemoryResponse>, Status> {
+        let message = request.into_inner();
+        map_to_tonic(commands::phys_mem::read(&message).await)
+    }
+    async fn write_physical_memory(
+        &self,
+        request: Request<WritePhysicalMemoryRequest>,
+    ) -> std::result::Result<Response<WritePhysicalMemoryResponse>, Status> {
+        let message = request.into_inner();
+        map_to_tonic(commands::phys_mem::write(&message).await)
+    }
+    async fn physical_memory_metadata(
+        &self,
+        request: Request<PhysicalMemoryMetadataRequest>,
+    ) -> std::result::Result<Response<PhysicalMemoryMetadataResponse>, Status> {
+        let message = request.into_inner();
+        map_to_tonic(commands::phys_mem::metadata(&message).await)
+    }
+    async fn read_virtual_memory(
+        &self,
+        request: Request<ReadVirtualMemoryRequest>,
+    ) -> std::result::Result<Response<ReadVirtualMemoryResponse>, Status> {
+        let message = request.into_inner();
+        map_to_tonic(commands::virt_mem::read(&message).await)
+    }
+    async fn write_virtual_memory(
+        &self,
+        request: Request<WriteVirtualMemoryRequest>,
+    ) -> std::result::Result<Response<WriteVirtualMemoryResponse>, Status> {
+        let message = request.into_inner();
+        map_to_tonic(commands::virt_mem::write(&message).await)
+    }
+    async fn list_processes(
+        &self,
+        request: Request<ListProcessesRequest>,
+    ) -> std::result::Result<Response<ListProcessesResponse>, Status> {
+        let message = request.into_inner();
+        map_to_tonic(commands::process::ls(&message).await)
+    }
+    async fn process_info(
+        &self,
+        request: Request<ProcessInfoRequest>,
+    ) -> std::result::Result<Response<ProcessInfoResponse>, Status> {
+        let message = request.into_inner();
+        map_to_tonic(commands::process::process_info(&message).await)
     }
 }
 
@@ -185,22 +123,22 @@ pub struct PidFile {
     _fd: i32,
 }
 
-#[cfg(not(target_os = "windows"))]
 impl PidFile {
     pub fn new(path: &str) -> Result<Self> {
-        let cpath = CString::new(path).map_err(|_| Error::Other("unable to convert path"))?;
+        let cpath =
+            CString::new(path).map_err(|_| Error::Other("unable o convert path".to_string()))?;
 
         let fd = unsafe {
             let fd = libc::open(cpath.as_ptr(), libc::O_WRONLY | libc::O_CREAT, 0o666);
             if fd == -1 {
                 return Err(Error::Other(
-                    "unable to open pidfile, is another daemon instance running?",
+                    "unable to open pidfile, is another daemon instance running?".to_string(),
                 ));
             }
 
             if libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) == -1 {
                 return Err(Error::Other(
-                    "unable to lock pidfile, is another daemon instance running?",
+                    "unable to lock pidfile, is another daemon instance running?".to_string(),
                 ));
             }
 
@@ -211,14 +149,10 @@ impl PidFile {
     }
 }
 
-#[cfg(target_os = "windows")]
-fn main() {
-    panic!("Windows not supported!")
-}
-
 #[cfg(not(target_os = "windows"))]
-#[tokio::main]
-async fn main() -> Result<()> {
+const CONFIG_FILE: &str = "/etc/memflow/daemon.conf";
+
+fn main() {
     let matches = App::new(crate_name!())
         .version(crate_version!())
         .long_version(format!("version: {}", crate_version!()).as_str())
@@ -305,74 +239,16 @@ async fn main() -> Result<()> {
     .expect("Failed to create PID file. Insufficent privileges? (rerun with -E)");
 
     // setup the listening socket
-    let url =
-        Url::parse(&config.socket_addr).map_err(|_| Error::Other("invalid socket address"))?;
-    match url.scheme() {
-        "tcp" => {
-            if let Some(host_str) = url.host_str() {
-                run_server_tcp(&format!("{}:{}", host_str, url.port().unwrap_or(8000))).await?
-            } else {
-                return Err(Error::Other("invalid tcp host address"));
-            }
-        }
-        "unix" => run_server_uds(url.path()).await?,
-        _ => return Err(Error::Other("only tcp and unix urls are supported")),
-    };
+    let addr = config.socket_addr.parse().unwrap();
+    // todo!("Read address from config");
+    let memflow = MyMemflow::default();
+    let rt = tokio::runtime::Runtime::new().expect("failed to obtain a new RunTime object");
 
-    Ok(())
-}
+    println!("MemflowServer listening on {}", addr);
 
-/// Spawns a unix file socket server and listens for incoming connections.
-/// The uds server accept framed json messages and dispatches them to the individual command handlers.
-#[cfg(not(target_os = "windows"))]
-async fn run_server_uds(path: &str) -> Result<()> {
-    // re-create socket if it already exists
-    std::fs::remove_file(path).ok();
-    let mut listener = UnixListener::bind(path).unwrap();
-
-    // setup uds permissions
-    let mut perms = std::fs::metadata(path).unwrap().permissions();
-    perms.set_mode(0o664);
-    std::fs::set_permissions(path, perms).unwrap();
-
-    // change ownership of the uds socket
-    // TODO: configure group
-    let gid = unsafe { get_gid_by_name("memflow") }
-        .ok_or_else(|| Error::Other("unable to find memflow group"))?;
-    let raw_socket_file = CString::new(path).map_err(|_| Error::Other("unable to convert path"))?;
-    unsafe { chown(raw_socket_file.as_ptr(), libc::getuid(), gid) };
-
-    info!("listening for incoming connections");
-    while let Some(stream) = listener.next().await {
-        match stream {
-            Ok(mut stream) => {
-                tokio::spawn(async move {
-                    let (reader, writer) = stream.split();
-
-                    let framed_reader = FramedRead::new(reader, LengthDelimitedCodec::new());
-                    let mut deserializer = tokio_serde::SymmetricallyFramed::new(
-                        framed_reader,
-                        SymmetricalJson::<request::Message>::default(),
-                    );
-
-                    let framed_writer = FramedWrite::new(writer, LengthDelimitedCodec::new());
-                    let mut serializer = tokio_serde::SymmetricallyFramed::new(
-                        framed_writer,
-                        SymmetricalJson::<response::Message>::default(),
-                    );
-
-                    // currently a client is only supposed to send a single request
-                    while let Some(msg) = deserializer.try_next().await.unwrap() {
-                        handle_message(&mut serializer, msg).await.ok();
-                    }
-                });
-            }
-            Err(e) => {
-                error!("{}", e);
-                return Err(Error::Other("connection attempt failed"));
-            }
-        }
-    }
-
-    Ok(())
+    let server = Server::builder()
+        .add_service(MemflowServer::new(memflow))
+        .serve(addr);
+    rt.block_on(server)
+        .expect("failed to run the server on tokio::runtime");
 }

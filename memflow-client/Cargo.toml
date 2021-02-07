@@ -1,10 +1,10 @@
 [package]
-name = "memflow-cli"
+name = "memflow-client"
 version = "0.1.0"
 authors = ["ko1N <ko1N1337@gmail.com>"]
 edition = "2018"
 license = "MIT"
-description = "memflow daemon command line interface"
+description = "memflow daemon client interface"
 homepage = "https://memflow.github.io"
 repository = "https://github.com/memflow/memflow-cli"
 readme = "../README.md"
@@ -13,8 +13,11 @@ categories = [ "api-bindings", "memory-management", "os" ]
 
 [dependencies]
 memflow-daemon = { path = "../memflow-daemon" }
-memflow-client = { path = "../memflow-client" }
-clap = { version = "2.33" }
+futures = "0.3"
 log = "0.4.8"
-simple_logger = "1.11"
-serde_json = "1.0"
+
+# rpc
+tonic = "0.4"
+tokio = { version = "1.0", features = ["rt-multi-thread", "time", "fs", "macros", "net"] }
+prost = "0.7"
+async-trait ="0.1"

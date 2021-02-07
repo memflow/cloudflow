@@ -8,11 +8,13 @@ lto = true
 [workspace]
 members = [
     "memflow-daemon",
+    "memflow-client",
     "memflow-cli",
     "memflow-daemon-connector",
 ]
 default-members = [
     "memflow-daemon",
+    "memflow-client",
     "memflow-cli",
     "memflow-daemon-connector",
 ]
