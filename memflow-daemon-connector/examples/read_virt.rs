@@ -7,6 +7,7 @@ extern crate clap;
 use clap::{App, Arg};
 
 use memflow::*;
+use memflow_win32::*;
 
 fn main() {
     let matches = App::new(crate_name!())
@@ -47,12 +48,12 @@ fn main() {
             return;
         }
     };
-
-    let metadata = conn.metadata();
-    info!("Received metadata: {:?}", metadata);
+    let mut kernel = win32::Kernel::builder(conn.clone()).build_default_caches().build().unwrap();
+    let mut proc = kernel.process("explorer.exe").expect("Could not open explorer.exe process");
+    let address = proc.proc_info.section_base;
 
     let mut mem = vec![0; 8];
-    conn.phys_read_raw_into(Address::from(0x1000).into(), &mut mem)
+    proc.virt_mem.virt_read_raw_into(address, &mut mem)
         .unwrap();
     info!("Received memory: {:?}", mem);
 
@@ -60,7 +61,7 @@ fn main() {
     let mut counter = 0;
     loop {
         let mut buf = vec![0; 0x1000];
-        conn.phys_read_raw_into(Address::from(0x1000).into(), &mut buf)
+        proc.virt_mem.virt_read_raw_into(address, &mut buf)
             .unwrap();
 
         counter += 1;
