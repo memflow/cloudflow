@@ -3,4 +3,6 @@
 
 memflow - machine introspection framework
 
-#
+## Contributing
+
+Please check [CONTRIBUTE.md](CONTRIBUTE.md)
