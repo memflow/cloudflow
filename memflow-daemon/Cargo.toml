@@ -16,11 +16,11 @@ memflow = { version = "0.1", features = ["inventory", "serde_derive"] }
 memflow-win32 = { version = "0.1", features = ["serde_derive"] }
 clap = { version = "2.33.0" }
 log = "0.4.8"
-simple_logger = "1.0.1"
-simple-logging = "2.0.2"
+simplelog = "0.8.0"
 url = "2.1"
 lazy_static = "1.4"
 uuid = { version = "0.8", features = ["v4"] }
+minidump-writer = { git = "https://github.com/h33p/minidump-writer" }
 
 # tokio
 tokio = { version = "0.3", features = ["full"] }
@@ -38,6 +38,7 @@ time = "0.1"
 fuse_mt = "0.5"
 libc = "0.2.51"
 pelite = { version = "0.9", features = ["serde"] }
+sudo = { git = "https://gitlab.com/Heep/sudo.rs.git" }
 
 # gdb
 gdbstub = "=0.2.1"

@@ -39,6 +39,9 @@ fn main() {
         }
     };
 
+    let metadata = conn.metadata();
+    info!("Received metadata: {:?}", metadata);
+
     let mut mem = vec![0; 8];
     conn.phys_read_raw_into(Address::from(0x1000).into(), &mut mem)
         .unwrap();

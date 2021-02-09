@@ -15,7 +15,7 @@ categories = [ "api-bindings", "memory-management", "os" ]
 memflow-daemon = { path = "../memflow-daemon" }
 clap = { version = "2.33.0" }
 log = "0.4.8"
-simple_logger = "1.0.1"
+simple_logger = "1.11"
 url = "2.1"
 prettytable-rs = "0.8"
 

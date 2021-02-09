@@ -77,4 +77,14 @@ impl FileSystemFileHandler for PhysicalDumpReader {
             }
         }
     }
+
+    fn write(&mut self, offset: u64, data: Vec<u8>) -> Result<usize> {
+        match &mut self.kernel {
+            KernelHandle::Win32(kernel) => kernel
+                .phys_mem
+                .phys_write_raw((offset as u64).into(), &data)
+                .map_err(Error::from)
+                .map(|_| data.len()),
+        }
+    }
 }
