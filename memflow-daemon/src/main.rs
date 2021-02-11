@@ -5,10 +5,12 @@ use log::LevelFilter;
 use memflow_daemon::Config;
 use memflow_rpc::memflow_server::{Memflow, MemflowServer};
 use memflow_rpc::{
-    CloseConnectionRequest, CloseConnectionResponse, ListConnectionsRequest,
-    ListConnectionsResponse, ListProcessesRequest, ListProcessesResponse, NewConnectionRequest,
-    NewConnectionResponse, PhysicalMemoryMetadataRequest, PhysicalMemoryMetadataResponse,
-    ProcessInfoRequest, ProcessInfoResponse, ReadPhysicalMemoryRequest, ReadPhysicalMemoryResponse,
+    CloseConnectionRequest, CloseConnectionResponse, FuseListRequest, FuseListResponse,
+    FuseMountRequest, FuseMountResponse, GdbAttachRequest, GdbAttachResponse, GdbListRequest,
+    GdbListResponse, ListConnectionsRequest, ListConnectionsResponse, ListProcessesRequest,
+    ListProcessesResponse, NewConnectionRequest, NewConnectionResponse,
+    PhysicalMemoryMetadataRequest, PhysicalMemoryMetadataResponse, ProcessInfoRequest,
+    ProcessInfoResponse, ReadPhysicalMemoryRequest, ReadPhysicalMemoryResponse,
     ReadVirtualMemoryRequest, ReadVirtualMemoryResponse, WritePhysicalMemoryRequest,
     WritePhysicalMemoryResponse, WriteVirtualMemoryRequest, WriteVirtualMemoryResponse,
 };
@@ -116,6 +118,34 @@ impl Memflow for MyMemflow {
     ) -> std::result::Result<Response<ProcessInfoResponse>, Status> {
         let message = request.into_inner();
         map_to_tonic(commands::process::process_info(&message).await)
+    }
+    async fn fuse_mount(
+        &self,
+        request: Request<FuseMountRequest>,
+    ) -> std::result::Result<Response<FuseMountResponse>, Status> {
+        let message = request.into_inner();
+        map_to_tonic(commands::fuse::mount(&message).await)
+    }
+    async fn fuse_list(
+        &self,
+        request: Request<FuseListRequest>,
+    ) -> std::result::Result<Response<FuseListResponse>, Status> {
+        let message = request.into_inner();
+        map_to_tonic(commands::fuse::ls(&message).await)
+    }
+    async fn gdb_attach(
+        &self,
+        request: Request<GdbAttachRequest>,
+    ) -> std::result::Result<Response<GdbAttachResponse>, Status> {
+        let message = request.into_inner();
+        map_to_tonic(commands::gdb::attach(&message).await)
+    }
+    async fn gdb_list(
+        &self,
+        request: Request<GdbListRequest>,
+    ) -> std::result::Result<Response<GdbListResponse>, Status> {
+        let message = request.into_inner();
+        map_to_tonic(commands::gdb::ls(&message).await)
     }
 }
 

@@ -54,7 +54,7 @@ impl FileSystemEntry for ModuleDumpFile {
                 }
             }
         } else {
-            Err(Error::Other("unable to lock kernel"))
+            Err(Error::Other("unable to lock kernel".to_string()))
         }
     }
 }
@@ -93,7 +93,9 @@ impl FileSystemFileHandler for ModuleDumpReader {
                 .map_err(Error::from)?;
             Ok(real_size)
         } else {
-            Err(Error::Other("cannot write past the module dump file size"))
+            Err(Error::Other(
+                "cannot write past the module dump file size".to_string(),
+            ))
         }
     }
 }
@@ -177,7 +179,7 @@ impl ModulePeHeaderFile {
     ) -> Result<String> {
         let mut kernel = kernel
             .lock()
-            .map_err(|_| Error::Other("unable to acquire kernel lock"))?;
+            .map_err(|_| Error::Other("unable to acquire kernel lock".to_string()))?;
         match &mut *kernel {
             KernelHandle::Win32(kernel) => {
                 let mut process = Win32Process::with_kernel_ref(kernel, pi);
@@ -236,7 +238,7 @@ impl ModulePeImportsFile {
     ) -> Result<String> {
         let mut kernel = kernel
             .lock()
-            .map_err(|_| Error::Other("unable to acquire kernel lock"))?;
+            .map_err(|_| Error::Other("unable to acquire kernel lock".to_string()))?;
         match &mut *kernel {
             KernelHandle::Win32(kernel) => {
                 let mut process = Win32Process::with_kernel_ref(kernel, pi);
@@ -316,7 +318,7 @@ impl ModulePeExportsFile {
     ) -> Result<String> {
         let mut kernel = kernel
             .lock()
-            .map_err(|_| Error::Other("unable to acquire kernel lock"))?;
+            .map_err(|_| Error::Other("unable to acquire kernel lock".to_string()))?;
         match &mut *kernel {
             KernelHandle::Win32(kernel) => {
                 let mut process = Win32Process::with_kernel_ref(kernel, pi);

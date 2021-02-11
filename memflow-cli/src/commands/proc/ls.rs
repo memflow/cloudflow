@@ -1,5 +1,5 @@
-use memflow_client::dispatch::dispatch_request;
 use crate::Config;
+use memflow_client::dispatch::dispatch_request;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 
@@ -31,13 +31,17 @@ pub fn handle_command(conf: &Config, matches: &ArgMatches) {
             conn_id: conn_id.to_string(),
         },
     );
-    
+
     match result {
         Err(e) => error!("{:#?}", e),
         // Ok(r) => println!("{:#?}", "asdf"),
         Ok(r) => {
-            let s: Vec<String> = r.processes.iter().map(|x| format!("Name: {}, Pid: {}", x.name, x.pid)).collect();
+            let s: Vec<String> = r
+                .processes
+                .iter()
+                .map(|x| format!("Name: {}, Pid: {}", x.name, x.pid))
+                .collect();
             println!("{:#?}", s)
-        },
+        }
     }
 }

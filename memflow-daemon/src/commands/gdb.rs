@@ -1,20 +1,14 @@
 mod stub;
 
-use crate::dispatch::*;
-use crate::dto::request;
-use crate::error::Result;
-use crate::response;
+use crate::error::{Error, Result};
 use crate::state::{new_uuid, STATE};
+use log::info;
 
-use futures::Sink;
-use std::marker::Unpin;
+use crate::memflow_rpc::{
+    GdbAttachRequest, GdbAttachResponse, GdbListRequest, GdbListResponse, GdbStub,
+};
 
-use memflow::PID;
-
-pub async fn attach<S: Sink<response::Message> + Unpin>(
-    frame: &mut S,
-    msg: request::GdbAttach,
-) -> Result<()> {
+pub async fn attach(msg: &GdbAttachRequest) -> Result<GdbAttachResponse> {
     let mut state = STATE.lock().await;
 
     // find connection and spawn gdb thread
@@ -22,62 +16,46 @@ pub async fn attach<S: Sink<response::Message> + Unpin>(
         let kernel = conn.kernel.clone();
         let id = new_uuid();
 
-        send_log_info(
-            frame,
-            &format!("gdb stub with id {} spawned at address {}", id, &msg.addr),
-        )
-        .await?;
-        send_log_info(
-            frame,
-            "the gdb stub will automatically be closed on disconnect",
-        )
-        .await?;
+        info!("gdb stub with id {} spawned at address {}", id, &msg.addr);
+        info!("the gdb stub will automatically be closed on disconnect");
 
+        let msg_clone = msg.clone();
+        let id_clone = id.clone();
         std::thread::spawn(move || {
             stub::spawn_gdb_stub(
-                &id,
-                &msg.conn_id,
-                msg.pid.parse::<PID>().unwrap(),
-                &msg.addr,
+                &id_clone,
+                &msg_clone.conn_id,
+                msg_clone.pid,
+                &msg_clone.addr,
                 kernel,
             )
             .unwrap();
         });
 
-        send_ok(frame).await
+        Ok(GdbAttachResponse { id: id })
     } else {
-        send_err(
-            frame,
-            &format!("no connection with id {} found", msg.conn_id),
-        )
-        .await
+        Err(Error::Connector(format!(
+            "no connection with id {} found",
+            msg.conn_id
+        )))
     }
 }
 
-pub async fn ls<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()> {
+pub async fn ls(_msg: &GdbListRequest) -> Result<GdbListResponse> {
     let state = STATE.lock().await;
 
-    send_log_info(
-        frame,
-        &format!("listing open gdb stubs: {} stubs", state.gdb_stubs.len()),
-    )
-    .await?;
+    info!("listing open gdb stubs: {} stubs", state.gdb_stubs.len());
 
-    if !state.gdb_stubs.is_empty() {
-        let mut table = response::Table::default();
-        table.headers = vec![
-            "id".to_string(),
-            "connection".to_string(),
-            "address".to_string(),
-        ];
+    let mut gdb_stubs = vec![];
 
-        for c in state.gdb_stubs.iter() {
-            let entry = vec![c.1.id.clone(), c.1.conn_id.clone(), c.1.addr.clone()];
-            table.entries.push(entry);
-        }
-
-        send_table(frame, table).await?;
+    for gdb_stub in state.gdb_stubs.iter() {
+        let stub = GdbStub {
+            id: gdb_stub.1.id.clone(),
+            connection: gdb_stub.1.conn_id.clone(),
+            addr: gdb_stub.1.addr.clone(),
+        };
+        gdb_stubs.push(stub);
     }
 
-    send_ok(frame).await
+    Ok(GdbListResponse { stubs: gdb_stubs })
 }

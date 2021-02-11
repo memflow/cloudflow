@@ -103,7 +103,7 @@ impl FileSystemEntry for ProcessMiniDump {
             let mut kernel = self
                 .kernel
                 .lock()
-                .map_err(|_| Error::Other("Poisoned lock"))?;
+                .map_err(|_| Error::Other("Poisoned lock".to_string()))?;
 
             match &mut *kernel {
                 KernelHandle::Win32(kernel) => {
@@ -153,7 +153,7 @@ impl FileSystemEntry for ProcessMiniDump {
                     minidump.directory.push(Box::new(memory_list));
                     minidump
                         .write_all(&mut cursor)
-                        .map_err(|_| Error::Other("Failed to write minidump"))?;
+                        .map_err(|_| Error::Other("Failed to write minidump".to_string()))?;
 
                     *locked_cache = Some(ret.clone());
 
@@ -217,7 +217,7 @@ impl FileSystemEntry for ProcessMemoryMaps {
             let mut kernel = self
                 .kernel
                 .lock()
-                .map_err(|_| Error::Other("Poisoned lock"))?;
+                .map_err(|_| Error::Other("Poisoned lock".to_string()))?;
 
             match &mut *kernel {
                 KernelHandle::Win32(kernel) => {

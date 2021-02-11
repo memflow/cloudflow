@@ -94,7 +94,7 @@ impl From<tonic::Status> for Error {
 
 impl Error {
     /// Returns a tuple representing the error description and its string value.
-    pub fn to_str_pair<'a>(&'a self) -> (&'a str, Option<&'a str>) {
+    pub fn to_str_pair(&self) -> (&str, Option<&str>) {
         match self {
             Error::Other(e) => ("other error", Some(e)),
             Error::IO => ("i/o error", None),

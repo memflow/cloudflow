@@ -29,7 +29,8 @@ impl DaemonConnector {
             Error::Other("unable to instantiate tokio runtime")
         })?;
 
-        let mut client: memflow_client::dispatch::Client = rt.block_on(memflow_client::dispatch::create_client_async(&conf));
+        let mut client: memflow_client::dispatch::Client =
+            rt.block_on(memflow_client::dispatch::create_client_async(&conf));
 
         let metadata = rt
             .block_on(memflow_client::dispatch::dispatch_request_async_client(

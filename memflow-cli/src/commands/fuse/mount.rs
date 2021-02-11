@@ -1,12 +1,12 @@
-use crate::dispatch::*;
 use crate::Config;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 
-use log::trace;
+use log::{error, trace};
 use std::fs;
 
-use memflow_daemon::request;
+use memflow_client::dispatch::dispatch_request;
+use memflow_daemon::memflow_rpc::FuseMountRequest;
 
 pub const COMMAND_STR: &str = "mount";
 
@@ -40,14 +40,18 @@ pub fn handle_command(conf: &Config, matches: &ArgMatches) {
     let canonical_path = fs::canonicalize(mount_point).unwrap();
     let full_path = canonical_path.to_str().unwrap();
 
-    dispatch_request(
+    let result = dispatch_request(
         conf,
-        request::Message::FuseMount(request::FuseMount {
+        FuseMountRequest {
             conn_id: conn_id.to_string(),
             mount_point: full_path.to_string(),
             uid: unsafe { libc::getuid() },
             gid: unsafe { libc::getgid() },
-        }),
-    )
-    .unwrap();
+        },
+    );
+
+    match result {
+        Err(e) => error!("{:#?}", e),
+        Ok(_) => println!("Fuse mount succeed"),
+    }
 }

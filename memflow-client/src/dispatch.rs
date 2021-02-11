@@ -3,10 +3,12 @@ use memflow_daemon::error::Result;
 
 use memflow_daemon::memflow_rpc::memflow_client::MemflowClient;
 use memflow_daemon::memflow_rpc::{
-    CloseConnectionRequest, CloseConnectionResponse, ListConnectionsRequest,
-    ListConnectionsResponse, ListProcessesRequest, ListProcessesResponse, NewConnectionRequest,
-    NewConnectionResponse, PhysicalMemoryMetadataRequest, PhysicalMemoryMetadataResponse,
-    ProcessInfoRequest, ProcessInfoResponse, ReadPhysicalMemoryRequest, ReadPhysicalMemoryResponse,
+    CloseConnectionRequest, CloseConnectionResponse, FuseListRequest, FuseListResponse,
+    FuseMountRequest, FuseMountResponse, GdbAttachRequest, GdbAttachResponse, GdbListRequest,
+    GdbListResponse, ListConnectionsRequest, ListConnectionsResponse, ListProcessesRequest,
+    ListProcessesResponse, NewConnectionRequest, NewConnectionResponse,
+    PhysicalMemoryMetadataRequest, PhysicalMemoryMetadataResponse, ProcessInfoRequest,
+    ProcessInfoResponse, ReadPhysicalMemoryRequest, ReadPhysicalMemoryResponse,
     ReadVirtualMemoryRequest, ReadVirtualMemoryResponse, WritePhysicalMemoryRequest,
     WritePhysicalMemoryResponse, WriteVirtualMemoryRequest, WriteVirtualMemoryResponse,
 };
@@ -226,5 +228,49 @@ impl DispatchMessage<tonic::Response<ProcessInfoResponse>> for tonic::Request<Pr
         client: &mut Client,
     ) -> Result<tonic::Response<ProcessInfoResponse>> {
         client.process_info(self).await.map_err(|x| x.into())
+    }
+}
+
+#[async_trait]
+impl DispatchMessage<tonic::Response<FuseMountResponse>> for tonic::Request<FuseMountRequest> {
+    async fn dispatch_message(
+        self,
+        _conf: &Config,
+        client: &mut Client,
+    ) -> Result<tonic::Response<FuseMountResponse>> {
+        client.fuse_mount(self).await.map_err(|x| x.into())
+    }
+}
+
+#[async_trait]
+impl DispatchMessage<tonic::Response<FuseListResponse>> for tonic::Request<FuseListRequest> {
+    async fn dispatch_message(
+        self,
+        _conf: &Config,
+        client: &mut Client,
+    ) -> Result<tonic::Response<FuseListResponse>> {
+        client.fuse_list(self).await.map_err(|x| x.into())
+    }
+}
+
+#[async_trait]
+impl DispatchMessage<tonic::Response<GdbAttachResponse>> for tonic::Request<GdbAttachRequest> {
+    async fn dispatch_message(
+        self,
+        _conf: &Config,
+        client: &mut Client,
+    ) -> Result<tonic::Response<GdbAttachResponse>> {
+        client.gdb_attach(self).await.map_err(|x| x.into())
+    }
+}
+
+#[async_trait]
+impl DispatchMessage<tonic::Response<GdbListResponse>> for tonic::Request<GdbListRequest> {
+    async fn dispatch_message(
+        self,
+        _conf: &Config,
+        client: &mut Client,
+    ) -> Result<tonic::Response<GdbListResponse>> {
+        client.gdb_list(self).await.map_err(|x| x.into())
     }
 }

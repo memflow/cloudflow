@@ -1,5 +1,5 @@
-use memflow_client::dispatch::dispatch_request;
 use crate::Config;
+use memflow_client::dispatch::dispatch_request;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 
@@ -38,7 +38,9 @@ pub fn handle_command(conf: &Config, matches: &ArgMatches) {
         conf,
         memflow_daemon::memflow_rpc::ProcessInfoRequest {
             conn_id: conn_id.to_string(),
-            pid: pid.parse().expect("integer parse failed, pid must be u32 value"),
+            pid: pid
+                .parse()
+                .expect("integer parse failed, pid must be u32 value"),
         },
     );
 

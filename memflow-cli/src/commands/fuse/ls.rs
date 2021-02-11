@@ -1,11 +1,11 @@
-use crate::dispatch::*;
 use crate::Config;
 
 use clap::{App, ArgMatches, SubCommand};
 
-use log::trace;
+use log::{error, trace};
 
-use memflow_daemon::request;
+use memflow_client::dispatch::dispatch_request;
+use memflow_daemon::memflow_rpc::FuseListRequest;
 
 pub const COMMAND_STR: &str = "ls";
 
@@ -16,5 +16,10 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
 pub fn handle_command(conf: &Config, _matches: &ArgMatches) {
     trace!("handling command");
 
-    dispatch_request(conf, request::Message::FuseListMounts).unwrap();
+    let result = dispatch_request(conf, FuseListRequest {});
+
+    match result {
+        Err(e) => error!("{:#?}", e),
+        Ok(r) => println!("{:#?}", r),
+    }
 }

@@ -41,28 +41,31 @@ fn main() {
     let id = matches.value_of("id").unwrap();
     let args = ConnectorArgs::parse(&(host.to_owned() + ",id=" + id + ",host=" + host)).unwrap();
     println!("{:#?}", args);
-    let mut conn = match memflow_daemon_connector::create_connector(&args) {
+    let conn = match memflow_daemon_connector::create_connector(&args) {
         Ok(br) => br,
         Err(e) => {
             info!("couldn't open memory read context: {:?}", e);
             return;
         }
     };
-    let mut kernel = win32::Kernel::builder(conn.clone()).build_default_caches().build().unwrap();
-    let mut proc = kernel.process("explorer.exe").expect("Could not open explorer.exe process");
+    let mut kernel = win32::Kernel::builder(conn.clone())
+        .build_default_caches()
+        .build()
+        .unwrap();
+    let mut proc = kernel
+        .process("explorer.exe")
+        .expect("Could not open explorer.exe process");
     let address = proc.proc_info.section_base;
 
     let mut mem = vec![0; 8];
-    proc.virt_mem.virt_read_raw_into(address, &mut mem)
-        .unwrap();
+    proc.virt_mem.virt_read_raw_into(address, &mut mem).unwrap();
     info!("Received memory: {:?}", mem);
 
     let start = Instant::now();
     let mut counter = 0;
     loop {
         let mut buf = vec![0; 0x1000];
-        proc.virt_mem.virt_read_raw_into(address, &mut buf)
-            .unwrap();
+        proc.virt_mem.virt_read_raw_into(address, &mut buf).unwrap();
 
         counter += 1;
         if (counter % 10000) == 0 {

@@ -102,7 +102,9 @@ impl State {
             if conn.refcount == 0 {
                 (conn.id.clone(), conn.alias.clone())
             } else {
-                return Err(Error::Connector("connection still has open references".into()));
+                return Err(Error::Connector(
+                    "connection still has open references".into(),
+                ));
             }
         } else {
             return Err(Error::Connector("connection not found".into()));

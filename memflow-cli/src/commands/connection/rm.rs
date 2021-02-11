@@ -1,5 +1,5 @@
-use memflow_client::dispatch::dispatch_request;
 use crate::Config;
+use memflow_client::dispatch::dispatch_request;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 

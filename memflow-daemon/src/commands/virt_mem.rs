@@ -83,7 +83,7 @@ pub async fn write(msg: &WriteVirtualMemoryRequest) -> Result<WriteVirtualMemory
                     .virt_mem
                     .virt_write_raw_list(&write_data.as_slice())?;
 
-                Ok(WriteVirtualMemoryResponse { })
+                Ok(WriteVirtualMemoryResponse {})
             }
         }
     } else {

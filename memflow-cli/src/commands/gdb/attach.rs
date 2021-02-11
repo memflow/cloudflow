@@ -1,11 +1,11 @@
-use crate::dispatch::*;
 use crate::Config;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 
-use log::trace;
+use log::{error, trace};
 
-use memflow_daemon::request;
+use memflow_client::dispatch::dispatch_request;
+use memflow_daemon::memflow_rpc::GdbAttachRequest;
 
 pub const COMMAND_STR: &str = "attach";
 
@@ -40,16 +40,27 @@ pub fn handle_command(conf: &Config, matches: &ArgMatches) {
     trace!("handling command");
 
     let conn_id = matches.value_of(CONNECTION_ID).unwrap();
-    let pid = matches.value_of(PROCESS_ID).unwrap();
+    let pid: u32 = matches
+        .value_of(PROCESS_ID)
+        .unwrap()
+        .parse()
+        .expect("integer parse failed, read size must be u32 value");
     let addr = matches.value_of(ADDRESS).unwrap();
 
-    dispatch_request(
+    let result = dispatch_request(
         conf,
-        request::Message::GdbAttach(request::GdbAttach {
+        GdbAttachRequest {
             conn_id: conn_id.to_string(),
-            pid: pid.to_string(),
+            pid: pid,
             addr: addr.to_string(),
-        }),
-    )
-    .unwrap();
+        },
+    );
+
+    match result {
+        Err(e) => error!("{:#?}", e),
+        Ok(r) => {
+            println!("gdb stub with id {} spawned at address {}", r.id, addr);
+            println!("the gdb stub will automatically be closed on disconnect");
+        }
+    };
 }

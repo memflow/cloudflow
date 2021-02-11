@@ -38,9 +38,9 @@ fn main() {
                 .default_value(CONFIG_FILE),
         )
         .subcommand(commands::connection::command_definition())
-        //.subcommand(commands::fuse::command_definition())
+        .subcommand(commands::fuse::command_definition())
         .subcommand(commands::proc::command_definition())
-        //.subcommand(commands::gdb::command_definition())
+        .subcommand(commands::gdb::command_definition())
         .subcommand(commands::benchmark::command_definition());
 
     let matches = app.clone().get_matches();
@@ -86,15 +86,15 @@ fn main() {
         (commands::connection::COMMAND_STR, Some(subargv)) => {
             commands::connection::handle_command(&conf, subargv)
         }
-        /*(commands::fuse::COMMAND_STR, Some(subargv)) => {
+        (commands::fuse::COMMAND_STR, Some(subargv)) => {
             commands::fuse::handle_command(&conf, subargv)
-        }*/
+        }
         (commands::proc::COMMAND_STR, Some(subargv)) => {
             commands::proc::handle_command(&conf, subargv)
         }
-        /*(commands::gdb::COMMAND_STR, Some(subargv)) => {
+        (commands::gdb::COMMAND_STR, Some(subargv)) => {
             commands::gdb::handle_command(&conf, subargv)
-        }*/
+        }
         (commands::benchmark::COMMAND_STR, Some(subargv)) => {
             commands::benchmark::handle_command(&conf, subargv)
         }

@@ -1,3 +1,14 @@
+/// How to add a new command:
+/// 1. define the protocol interface with the required parameters in memflow_rpc.proto (Protobuf 3)
+/// 1.1. Add message MyNewCommandRequest and message MyNewCommandResponse
+/// 1.2. Add rpc MyNewCommand (MyNewCommandRequest) returns (MyNewCommandResponse);
+/// 2. Implement the new command in memflow-cli
+/// 2.1. implement new command in a new file in "commands" folder and reference it in commands/mod.rs
+/// 2.2. main.rs: add new command to args definition and parsing
+/// 3. Implement the new command in memflow-daemon
+/// 3.1. Implement new command in a new file in "commands" folder and reference it in commands/mod.rs
+/// 3.2. main.rs: add trait implementation
+
 syntax = "proto3";
 
 package memflow_rpc;
@@ -22,6 +33,14 @@ service Memflow {
     rpc ListProcesses (ListProcessesRequest) returns (ListProcessesResponse);
 
     rpc ProcessInfo (ProcessInfoRequest) returns (ProcessInfoResponse);
+
+    rpc FuseMount (FuseMountRequest) returns (FuseMountResponse);
+
+    rpc FuseList (FuseListRequest) returns (FuseListResponse);
+
+    rpc GdbAttach (GdbAttachRequest) returns (GdbAttachResponse);
+
+    rpc GdbList (GdbListRequest) returns (GdbListResponse);
 }
 
 // **************************************
@@ -206,4 +225,55 @@ message Win32ModuleInfo {
     uint64 size = 4;
     string path = 5;
     string name = 6;
+}
+
+// **************************************
+// FUSE
+message FuseMountRequest {
+    string conn_id = 1;
+    string mount_point = 2;
+    uint32 uid = 3;
+    uint32 gid = 4;
+}
+
+message FuseMountResponse {
+}
+
+message FuseListRequest {
+}
+
+message FuseListResponse {
+    repeated FuseMount mounts = 1;
+}
+
+message FuseMount {
+    string id = 1;
+    string conn_id = 2;
+    string mount_point = 3;
+}
+
+// **************************************
+// GDB
+message GdbAttachRequest {
+    string conn_id = 1;
+    uint32 pid = 2;
+    string addr = 3;
+    // TODO: fetch file permissions for unix sockets
+}
+
+message GdbAttachResponse {
+    string id = 1;
+}
+
+message GdbListRequest {
+}
+
+message GdbListResponse {
+    repeated GdbStub stubs = 1;
+}
+
+message GdbStub {
+    string id = 1;
+    string connection = 2;
+    string addr = 3;
 }
