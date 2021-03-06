@@ -48,7 +48,7 @@ impl FileSystemEntry for PhysicalDumpFile {
         if let Ok(kernel) = self.kernel.lock() {
             Ok(Box::new(PhysicalDumpReader::new(kernel.clone())))
         } else {
-            Err(Error::Other("unable to lock kernel"))
+            Err(Error::Other("unable to lock kernel".to_string()))
         }
     }
 }

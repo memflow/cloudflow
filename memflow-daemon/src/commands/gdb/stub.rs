@@ -86,7 +86,7 @@ fn gdb_stub_drop(id: &str, conn_id: &str) -> Result<()> {
 }
 
 fn gdb_wait_for_connection(addr: &str, mut stub: GdbStubx64) -> Result<()> {
-    let url = Url::parse(addr).map_err(|_| Error::Other("invalid url"))?;
+    let url = Url::parse(addr).map_err(|_| Error::Other("invalid url".to_string()))?;
     let connection: Box<dyn Connection<Error = std::io::Error>> = match url.scheme() {
         "tcp" => {
             if let Some(host_str) = url.host_str() {
@@ -96,11 +96,16 @@ fn gdb_wait_for_connection(addr: &str, mut stub: GdbStubx64) -> Result<()> {
                     url.port().unwrap_or(8000)
                 ))?)
             } else {
-                return Err(Error::Other("invalid tcp host"));
+                return Err(Error::Other("invalid tcp host".to_string()));
             }
         }
+        #[cfg(not(target_os = "windows"))]
         "unix" => Box::new(wait_for_uds(url.path())?),
-        _ => return Err(Error::Other("only tcp and unix urls are supported")),
+        _ => {
+            return Err(Error::Other(
+                "only tcp and unix (not on Windows) urls are supported".to_string(),
+            ))
+        }
     };
 
     // hook-up debugger

@@ -1,11 +1,9 @@
-use crate::dispatch::*;
 use crate::Config;
+use memflow_client::dispatch::dispatch_request;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 
-use log::trace;
-
-use memflow_daemon::request;
+use log::{error, trace};
 
 pub const COMMAND_STR: &str = "new";
 
@@ -45,13 +43,17 @@ pub fn handle_command(conf: &Config, matches: &ArgMatches) {
     let args = matches.value_of(CONNECTOR_ARGS);
     let alias = matches.value_of(CONNECTOR_ALIAS);
 
-    dispatch_request(
+    let result = dispatch_request(
         conf,
-        request::Message::Connect(request::Connect {
+        memflow_daemon::memflow_rpc::NewConnectionRequest {
             name: name.to_string(),
-            args: args.map(|s| s.to_string()),
-            alias: alias.map(|a| a.to_string()),
-        }),
-    )
-    .unwrap();
+            args: args.unwrap_or_default().to_string(),
+            alias: alias.unwrap_or_default().to_string(),
+        },
+    );
+
+    match result {
+        Err(e) => error!("{:#?}", e),
+        Ok(r) => println!("New connection id: {}", r.conn_id),
+    }
 }

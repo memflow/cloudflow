@@ -1,59 +1,50 @@
-use crate::dispatch::*;
-use crate::dto::request;
-use crate::error::Result;
-use crate::response;
+use crate::error::{Error, Result};
 use crate::state::{KernelHandle, STATE};
 
-use futures::Sink;
-use std::marker::Unpin;
+use memflow::{PhysicalMemory, PhysicalReadData, PhysicalWriteData};
 
-use memflow::*;
+use crate::memflow_rpc::{
+    PhysicalMemoryMetadata, PhysicalMemoryMetadataRequest, PhysicalMemoryMetadataResponse,
+    ReadPhysicalMemoryEntryResponse, ReadPhysicalMemoryRequest, ReadPhysicalMemoryResponse,
+    WritePhysicalMemoryRequest, WritePhysicalMemoryResponse,
+};
 
-pub async fn read<S: Sink<response::Message> + Unpin>(
-    frame: &mut S,
-    msg: request::ReadPhysicalMemory,
-) -> Result<()> {
+pub async fn read(msg: &ReadPhysicalMemoryRequest) -> Result<ReadPhysicalMemoryResponse> {
     let mut state = STATE.lock().await;
     if let Some(conn) = state.connection_mut(&msg.conn_id) {
         match &mut conn.kernel {
             KernelHandle::Win32(kernel) => {
                 // create [PhysicalReadData]
-                let mut reads = Vec::new();
+                let mut result_reads = Vec::new();
                 let mut read_data = Vec::new();
                 for read in msg.reads.iter() {
-                    reads.push(response::PhysicalMemoryReadEntry {
-                        data: vec![0u8; read.len],
+                    result_reads.push(ReadPhysicalMemoryEntryResponse {
+                        data: vec![0u8; read.len as usize],
                     });
                 }
 
-                for read in msg.reads.iter().zip(reads.iter_mut()) {
-                    read_data.push(PhysicalReadData(read.0.addr, &mut read.1.data[..]));
+                for read in msg.reads.iter().zip(result_reads.iter_mut()) {
+                    read_data.push(PhysicalReadData(read.0.addr.into(), &mut read.1.data[..]));
                 }
 
-                if kernel
+                kernel
                     .phys_mem
-                    .phys_read_raw_list(&mut read_data.as_mut_slice())
-                    .is_ok()
-                {
-                    send_phys_mem_read(frame, reads).await
-                } else {
-                    send_err(frame, &format!("unable to read memory: {:?}", msg.reads)).await
-                }
+                    .phys_read_raw_list(&mut read_data.as_mut_slice())?;
+
+                Ok(ReadPhysicalMemoryResponse {
+                    reads: result_reads,
+                })
             }
         }
     } else {
-        send_err(
-            frame,
-            &format!("no connection with id {} found", msg.conn_id),
-        )
-        .await
+        Err(Error::Connector(format!(
+            "no connection with id {} found",
+            msg.conn_id
+        )))
     }
 }
 
-pub async fn write<S: Sink<response::Message> + Unpin>(
-    frame: &mut S,
-    msg: request::WritePhysicalMemory,
-) -> Result<()> {
+pub async fn write(msg: &WritePhysicalMemoryRequest) -> Result<WritePhysicalMemoryResponse> {
     let mut state = STATE.lock().await;
     if let Some(conn) = state.connection_mut(&msg.conn_id) {
         match &mut conn.kernel {
@@ -61,46 +52,45 @@ pub async fn write<S: Sink<response::Message> + Unpin>(
                 // create [PhysicalWriteData]
                 let mut write_data = Vec::new();
                 for write in msg.writes.iter() {
-                    write_data.push(PhysicalWriteData(write.addr, &write.data.as_slice()));
+                    write_data.push(PhysicalWriteData(write.addr.into(), &write.data.as_slice()));
                 }
 
-                if kernel
+                kernel
                     .phys_mem
-                    .phys_write_raw_list(&write_data.as_slice())
-                    .is_ok()
-                {
-                    send_ok(frame).await
-                } else {
-                    send_err(frame, "unable to write memory").await
-                }
+                    .phys_write_raw_list(&write_data.as_slice())?;
+
+                Ok(WritePhysicalMemoryResponse {})
             }
         }
     } else {
-        send_err(
-            frame,
-            &format!("no connection with id {} found", msg.conn_id),
-        )
-        .await
+        Err(Error::Connector(format!(
+            "no connection with id {} found",
+            msg.conn_id
+        )))
     }
 }
 
-pub async fn metadata<S: Sink<response::Message> + Unpin>(
-    frame: &mut S,
-    msg: request::PhysicalMemoryMetadata,
-) -> Result<()> {
+pub async fn metadata(
+    msg: &PhysicalMemoryMetadataRequest,
+) -> Result<PhysicalMemoryMetadataResponse> {
     let mut state = STATE.lock().await;
     if let Some(conn) = state.connection_mut(&msg.conn_id) {
         match &mut conn.kernel {
             KernelHandle::Win32(kernel) => {
                 let metadata = kernel.phys_mem.metadata();
-                send_phys_mem_metadata(frame, metadata).await
+
+                Ok(PhysicalMemoryMetadataResponse {
+                    metadata: Some(PhysicalMemoryMetadata {
+                        size: metadata.size as u64,
+                        readonly: metadata.readonly,
+                    }),
+                })
             }
         }
     } else {
-        send_err(
-            frame,
-            &format!("no connection with id {} found", msg.conn_id),
-        )
-        .await
+        Err(Error::Connector(format!(
+            "no connection with id {} found",
+            msg.conn_id
+        )))
     }
 }

@@ -1,21 +1,17 @@
-mod error;
-
 mod commands;
-mod dispatch;
 
 #[macro_use]
 extern crate clap;
 use clap::{App, Arg};
 
-use log::debug;
-use log::Level;
+use log::{debug, LevelFilter};
+
+use memflow_client::dispatch::Config;
 
 #[cfg(not(target_os = "windows"))]
-const CONFIG_FILE: &str = "/etc/memflow/daemon.conf";
-
-pub struct Config {
-    pub host: String,
-}
+const CONFIG_FILE: &str = "/etc/memflow/client.conf";
+#[cfg(target_os = "windows")]
+const CONFIG_FILE: &str = "client.conf";
 
 fn main() {
     let long_version = format!("version: {}", crate_version!());
@@ -44,12 +40,31 @@ fn main() {
         .subcommand(commands::connection::command_definition())
         .subcommand(commands::fuse::command_definition())
         .subcommand(commands::proc::command_definition())
-        .subcommand(commands::gdb::command_definition());
+        .subcommand(commands::gdb::command_definition())
+        .subcommand(commands::benchmark::command_definition());
 
     let matches = app.clone().get_matches();
 
+    let config_path = matches.value_of("config").unwrap();
+    let config_str = std::fs::read_to_string(config_path).unwrap();
+    let config: memflow_daemon::Config = serde_json::from_str(&config_str).unwrap();
+
+    // setup verbosity
+    let log_filter = match config
+        .verbosity
+        .unwrap_or_else(|| "info".to_string())
+        .as_str()
+    {
+        "error" => LevelFilter::Error,
+        "warn" => LevelFilter::Warn,
+        "info" => LevelFilter::Info,
+        "debug" => LevelFilter::Debug,
+        "trace" => LevelFilter::Trace,
+        _ => LevelFilter::Trace,
+    };
+
     simple_logger::SimpleLogger::new()
-        .with_level(Level::Debug.to_level_filter())
+        .with_level(log_filter)
         .init()
         .unwrap();
 
@@ -60,10 +75,7 @@ fn main() {
             host: host.to_string(),
         }
     } else {
-        let config_path = matches.value_of("config").unwrap();
         debug!("loading host from configuration file: {}", config_path);
-        let config_str = std::fs::read_to_string(config_path).unwrap();
-        let config: memflow_daemon::Config = serde_json::from_str(&config_str).unwrap();
         Config {
             host: config.socket_addr,
         }
@@ -82,6 +94,9 @@ fn main() {
         }
         (commands::gdb::COMMAND_STR, Some(subargv)) => {
             commands::gdb::handle_command(&conf, subargv)
+        }
+        (commands::benchmark::COMMAND_STR, Some(subargv)) => {
+            commands::benchmark::handle_command(&conf, subargv)
         }
         _ => {
             app.print_help().ok();

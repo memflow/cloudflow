@@ -1,26 +1,23 @@
 mod filesystem;
 use filesystem::VirtualMemoryFileSystem;
+use log::info;
 
-use crate::dispatch::*;
-use crate::dto::request;
 use crate::error::{Error, Result};
-use crate::response;
 use crate::state::{new_uuid, STATE};
 
-use futures::Sink;
+use crate::memflow_rpc::{
+    FuseListRequest, FuseListResponse, FuseMount, FuseMountRequest, FuseMountResponse,
+};
+
 use std::ffi::OsStr;
-use std::marker::Unpin;
 use std::path::Path;
 
-pub async fn mount<S: Sink<response::Message> + Unpin>(
-    frame: &mut S,
-    msg: request::FuseMount,
-) -> Result<()> {
+pub async fn mount(msg: &FuseMountRequest) -> Result<FuseMountResponse> {
     let mut state = STATE.lock().await;
 
     let is_empty = Path::new(&msg.mount_point)
         .read_dir()
-        .map_err(|_| Error::Other("mount point not found"))?
+        .map_err(|_| Error::Other("mount point not found".to_string()))?
         .next()
         .is_none();
     if is_empty {
@@ -29,82 +26,74 @@ pub async fn mount<S: Sink<response::Message> + Unpin>(
             let kernel = conn.kernel.clone();
             let id = new_uuid();
 
-            send_log_info(
-                frame,
-                &format!("filesystem with id {} mounted at {}", id, &msg.mount_point),
-            )
-            .await?;
-            send_log_info(
-                frame,
-                "please use 'umount' or 'fusermount -u' to unmount the filesystem",
-            )
-            .await?;
+            info!("filesystem with id {} mounted at {}", id, &msg.mount_point);
+            info!("please use 'umount' or 'fusermount -u' to unmount the filesystem");
 
+            let msg_clone = msg.clone();
             std::thread::spawn(move || {
                 let opts = [
                     "-o",
-                    &format!("auto_unmount,allow_other,uid={},gid={}", msg.uid, msg.gid),
+                    &format!(
+                        "auto_unmount,allow_other,uid={},gid={}",
+                        msg_clone.uid, msg_clone.gid
+                    ),
                 ];
                 let mntopts = opts.iter().map(|o| o.as_ref()).collect::<Vec<&OsStr>>();
 
                 // the filesystem will add itself into the global scope
                 let vmfs = VirtualMemoryFileSystem::new(
                     &id,
-                    &msg.conn_id,
-                    &msg.mount_point,
+                    &msg_clone.conn_id,
+                    &msg_clone.mount_point,
                     kernel,
-                    msg.uid,
-                    msg.gid,
+                    msg_clone.uid,
+                    msg_clone.gid,
                 );
 
                 // blocks until the fs is umounted
-                fuse_mt::mount(fuse_mt::FuseMT::new(vmfs, 8), &msg.mount_point, &mntopts).unwrap();
+                fuse_mt::mount(
+                    fuse_mt::FuseMT::new(vmfs, 8),
+                    &msg_clone.mount_point,
+                    &mntopts,
+                )
+                .unwrap();
             });
 
-            send_ok(frame).await
+            Ok(FuseMountResponse {})
         } else {
-            send_err(
-                frame,
-                &format!("no connection with id {} found", msg.conn_id),
-            )
-            .await
+            Err(Error::Connector(format!(
+                "no connection with id {} found",
+                msg.conn_id
+            )))
         }
     } else {
-        send_err(
-            frame,
-            &format!("mount point {} is not empty", msg.mount_point),
-        )
-        .await
+        Err(Error::Other(format!(
+            "mount point {} is not empty",
+            msg.mount_point
+        )))
     }
 }
 
-pub async fn ls<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()> {
+pub async fn ls(_msg: &FuseListRequest) -> Result<FuseListResponse> {
     let state = STATE.lock().await;
 
-    send_log_info(
-        frame,
-        &format!(
-            "listing mounted file systems: {} file systems",
-            state.file_systems.len()
-        ),
-    )
-    .await?;
+    info!(
+        "listing mounted file systems: {} file systems",
+        state.file_systems.len()
+    );
 
-    if !state.file_systems.is_empty() {
-        let mut table = response::Table::default();
-        table.headers = vec![
-            "id".to_string(),
-            "connection".to_string(),
-            "mount point".to_string(),
-        ];
+    let mut file_systems = vec![];
 
-        for c in state.file_systems.iter() {
-            let entry = vec![c.1.id.clone(), c.1.conn_id.clone(), c.1.mount_point.clone()];
-            table.entries.push(entry);
-        }
-
-        send_table(frame, table).await?;
+    for file_system in state.file_systems.iter() {
+        let fuse_mount = FuseMount {
+            id: file_system.1.id.clone(),
+            conn_id: file_system.1.conn_id.clone(),
+            mount_point: file_system.1.mount_point.clone(),
+        };
+        file_systems.push(fuse_mount);
     }
 
-    send_ok(frame).await
+    Ok(FuseListResponse {
+        mounts: file_systems,
+    })
 }

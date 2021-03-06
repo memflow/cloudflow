@@ -1,145 +1,127 @@
-use crate::dispatch::*;
-use crate::dto::request;
 use crate::error::{Error, Result};
-use crate::response;
 use crate::state::{KernelHandle, STATE};
 
-use futures::Sink;
-use std::marker::Unpin;
+use log::{error, info};
+use memflow::{ConnectorArgs, ConnectorInstance, ConnectorInventory};
 
-use memflow::*;
+use crate::memflow_rpc::{
+    CloseConnectionRequest, CloseConnectionResponse, ConnectionDescription, ListConnectionsRequest,
+    ListConnectionsResponse, NewConnectionRequest, NewConnectionResponse,
+};
 
-fn create_connector(msg: &request::Connect) -> Result<ConnectorInstance> {
+fn create_connector(msg: &NewConnectionRequest) -> Result<ConnectorInstance> {
     let args = match &msg.args {
-        Some(a) => ConnectorArgs::parse(a)
-            .map_err(|_| Error::Connector("unable to parse connector string"))?,
-        None => ConnectorArgs::default(),
+        args if args == "" => ConnectorArgs::default(),
+        args => ConnectorArgs::parse(&args)
+            .map_err(|_| Error::Connector("unable to parse connector string".into()))?,
     };
 
-    let inventory = unsafe { ConnectorInventory::try_new() }.map_err(Error::from)?;
+    let inventory = unsafe { ConnectorInventory::scan() };
     unsafe { inventory.create_connector(&msg.name, &args) }.map_err(Error::from)
 }
 
-pub async fn new<S: Sink<response::Message> + Unpin>(
-    frame: &mut S,
-    msg: request::Connect,
-) -> Result<()> {
-    match create_connector(&msg) {
+pub async fn new<'a>(msg: &NewConnectionRequest) -> Result<NewConnectionResponse> {
+    match create_connector(msg) {
         Ok(conn) => {
             // TODO: add os argument
             // TODO: redirect log to client
             // TODO: add cache options
 
-            send_log_info(frame, "connector created").await?;
+            info!("connector created");
 
             // initialize kernel
             let kernel = memflow_win32::Kernel::builder(conn)
                 .build_default_caches()
-                .build()
-                .map_err(|_| Error::Connector("unable to find kernel"))?;
+                .build()?;
 
-            send_log_info(frame, "found win32 kernel").await?;
+            info!("found win32 kernel");
 
             let mut state = STATE.lock().await;
 
             match state.connection_add(
                 &msg.name,
-                msg.args.clone(),
-                msg.alias,
+                if msg.args == "" {
+                    None
+                } else {
+                    Some(msg.args.clone())
+                },
+                if msg.alias == "" {
+                    None
+                } else {
+                    Some(msg.alias.clone())
+                },
                 KernelHandle::Win32(kernel),
             ) {
                 Ok(id) => {
-                    send_log_info(
-                        frame,
-                        &format!("connection created: {} | {} | {:?}", id, msg.name, msg.args),
-                    )
-                    .await?;
-                    send_ok(frame).await
+                    info!("connection created: {} | {} | {:?}", id, msg.name, msg.args);
+                    Ok(NewConnectionResponse { conn_id: id })
                 }
                 Err(err) => {
-                    send_err(
-                        frame,
-                        &format!(
-                            "could not create connector: {} | {:?} ({})",
-                            msg.name, msg.args, err
-                        ),
-                    )
-                    .await
+                    let err_msg = format!(
+                        "could not create connector: {} | {:?} ({})",
+                        msg.name, msg.args, err
+                    );
+                    error!("{}", err_msg);
+                    Err(Error::Connector(err_msg))
                 }
             }
         }
         Err(err) => {
-            send_err(
-                frame,
-                &format!(
-                    "could not create connector: {} | {:?} ({})",
-                    msg.name, msg.args, err
-                ),
-            )
-            .await
+            let err_msg = format!(
+                "could not create connector: {} | {:?} ({})",
+                msg.name, msg.args, err
+            );
+            error!("{}", err_msg);
+            Err(Error::Connector(err_msg))
         }
     }
 }
 
-pub async fn ls<S: Sink<response::Message> + Unpin>(frame: &mut S) -> Result<()> {
+pub async fn ls(_msg: &ListConnectionsRequest) -> Result<ListConnectionsResponse> {
     let state = STATE.lock().await;
 
-    send_log_info(
-        frame,
-        &format!(
-            "listing open connections: {} connections",
-            state.connections.len()
-        ),
-    )
-    .await?;
+    info!(
+        "listing open connections: {} connections",
+        state.connections.len()
+    );
+
+    let mut connections = vec![];
 
     if !state.connections.is_empty() {
-        let mut table = response::Table::default();
-        table.headers = vec![
-            "id".to_string(),
-            "alias".to_string(),
-            "refs".to_string(),
-            "name".to_string(),
-            "args".to_string(),
-        ];
-
         for c in state.connections.iter() {
-            let entry = vec![
-                c.1.id.to_string(),
-                c.1.alias
+            let con = ConnectionDescription {
+                conn_id: c.1.id.clone(),
+                name: c.1.name.clone(),
+                args: c.1.args.as_ref().map(|a| a.to_string()).unwrap_or_default(),
+                alias: c
+                    .1
+                    .alias
                     .as_ref()
                     .map(|a| a.to_string())
                     .unwrap_or_default(),
-                c.1.refcount.to_string(),
-                c.1.name.to_string(),
-                c.1.args.as_ref().map(|a| a.to_string()).unwrap_or_default(),
-            ];
-            table.entries.push(entry);
+                refcount: c.1.refcount as u64,
+            };
+            connections.push(con);
         }
-
-        send_table(frame, table).await?;
     }
 
-    send_ok(frame).await
+    Ok(ListConnectionsResponse {
+        connections: connections,
+    })
 }
 
-pub async fn rm<S: Sink<response::Message> + Unpin>(
-    frame: &mut S,
-    msg: request::CloseConnection,
-) -> Result<()> {
+pub async fn rm(msg: &CloseConnectionRequest) -> Result<CloseConnectionResponse> {
     let mut state = STATE.lock().await;
 
     match state.connection_remove(&msg.conn_id) {
         Ok(_) => {
-            send_log_info(frame, &format!("connection {} removed", msg.conn_id)).await?;
-            send_ok(frame).await
+            info!("connection {} removed", msg.conn_id);
+            Ok(CloseConnectionResponse {})
         }
         Err(err) => {
-            send_err(
-                frame,
-                &format!("unable to remove connection {}: {}", msg.conn_id, err),
-            )
-            .await
+            let err_msg = format!("unable to remove connection {}: {}", msg.conn_id, err);
+            error!("{}", err_msg);
+            Err(Error::Connector(err_msg))
         }
     }
 }

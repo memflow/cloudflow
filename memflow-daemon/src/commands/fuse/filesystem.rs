@@ -44,7 +44,7 @@ pub trait FileSystemEntry: Send + Sync {
 
     /// Tries to open the leaf
     fn open(&self) -> Result<Box<dyn FileSystemFileHandler>> {
-        Err(Error::Other("unable to open file"))
+        Err(Error::Other("unable to open file".to_string()))
     }
 }
 
@@ -141,7 +141,7 @@ impl FileSystemChildren {
 pub trait FileSystemFileHandler {
     fn read(&mut self, offset: u64, size: u32) -> Result<Vec<u8>>;
     fn write(&mut self, _offset: u64, _data: Vec<u8>) -> Result<usize> {
-        Err(Error::Other("unable to write to file"))
+        Err(Error::Other("unable to write to file".to_string()))
     }
 }
 
@@ -173,7 +173,7 @@ impl FileSystemFileHandler for StaticFileReader {
 
         let start = std::cmp::min((offset + 1) as usize, contents.len())
             .checked_sub(1)
-            .ok_or(Error::Other("Reading from empty buffer"))?;
+            .ok_or(Error::Other("Reading from empty buffer".to_string()))?;
         let end = std::cmp::min((offset + size as u64) as usize, contents.len());
 
         Ok(contents[start..end].to_vec())

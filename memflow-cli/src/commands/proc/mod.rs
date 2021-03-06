@@ -1,5 +1,7 @@
 mod ls;
 
+mod info;
+
 use crate::Config;
 
 use clap::{App, ArgMatches, SubCommand};
@@ -12,6 +14,7 @@ pub fn command_definition<'a, 'b>() -> App<'a, 'b> {
     SubCommand::with_name(COMMAND_STR)
         .about("manage processes")
         .subcommand(ls::command_definition())
+        .subcommand(info::command_definition())
 }
 
 pub fn handle_command(conf: &Config, matches: &ArgMatches) {
@@ -19,6 +22,7 @@ pub fn handle_command(conf: &Config, matches: &ArgMatches) {
 
     match matches.subcommand() {
         (ls::COMMAND_STR, Some(matches)) => ls::handle_command(conf, matches),
+        (info::COMMAND_STR, Some(matches)) => info::handle_command(conf, matches),
         _ => {
             command_definition().print_help().ok();
             println!();

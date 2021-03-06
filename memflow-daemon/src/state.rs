@@ -60,7 +60,7 @@ impl State {
                 .contains_key(alias.as_ref().unwrap())
         {
             return Err(Error::Connector(
-                "a connection with this alias already exists",
+                "a connection with this alias already exists".into(),
             ));
         }
 
@@ -102,10 +102,12 @@ impl State {
             if conn.refcount == 0 {
                 (conn.id.clone(), conn.alias.clone())
             } else {
-                return Err(Error::Connector("connection still has open references"));
+                return Err(Error::Connector(
+                    "connection still has open references".into(),
+                ));
             }
         } else {
-            return Err(Error::Connector("connection not found"));
+            return Err(Error::Connector("connection not found".into()));
         };
 
         if let Some(alias) = &alias {
