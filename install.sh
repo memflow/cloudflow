@@ -22,6 +22,8 @@ if [ ! -z "$1" ] && [ $1 = "--system" ]; then
         sudo mkdir -p /etc/memflow/
         sudo cp daemon.conf /etc/memflow/daemon.conf
 
+        sudo cp client.conf /etc/memflow/client.conf
+
         sudo cp memflow.service /etc/systemd/system/
         sudo systemctl enable memflow.service
         sudo systemctl start memflow.service
