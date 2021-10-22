@@ -1,6 +1,6 @@
 use super::super::{FileSystemEntry, FileSystemFileHandler, StaticFileReader};
 use crate::error::{Error, Result};
-use crate::state::KernelHandle;
+use crate::state::{CachedWin32Process, KernelHandle};
 
 use minidump_writer::{
     minidump::Minidump,
@@ -49,6 +49,84 @@ impl FileSystemEntry for ProcessInfoFile {
 
     fn open(&self) -> Result<Box<dyn FileSystemFileHandler>> {
         Ok(Box::new(StaticFileReader::new(&self.pistr)))
+    }
+}
+
+pub struct ProcessDumpFile {
+    kernel: Arc<Mutex<KernelHandle>>,
+    pi: Win32ProcessInfo,
+}
+
+impl ProcessDumpFile {
+    pub fn new(kernel: Arc<Mutex<KernelHandle>>, pi: Win32ProcessInfo) -> Self {
+        Self { kernel, pi }
+    }
+}
+
+impl FileSystemEntry for ProcessDumpFile {
+    fn name(&self) -> &str {
+        "dump"
+    }
+
+    fn is_leaf(&self) -> bool {
+        true
+    }
+
+    fn size(&self) -> usize {
+        0
+    }
+
+    fn is_writable(&self) -> bool {
+        true
+    }
+
+    fn open(&self) -> Result<Box<dyn FileSystemFileHandler>> {
+        if let Ok(kernel) = self.kernel.lock() {
+            match &*kernel {
+                KernelHandle::Win32(kernel) => {
+                    let process = Win32Process::with_kernel(kernel.clone(), self.pi.clone());
+                    Ok(Box::new(ProcessDumpReader::new(process)))
+                }
+            }
+        } else {
+            Err(Error::Other("unable to lock kernel".to_string()))
+        }
+    }
+}
+
+struct ProcessDumpReader {
+    process: CachedWin32Process,
+}
+
+impl ProcessDumpReader {
+    pub fn new(process: CachedWin32Process) -> Self {
+        Self { process }
+    }
+}
+
+impl FileSystemFileHandler for ProcessDumpReader {
+    fn read(&mut self, offset: u64, size: u32) -> Result<Vec<u8>> {
+        self.process
+            .virt_mem
+            .virt_read_raw(offset.into(), size as usize)
+            .data_part()
+            .map_err(Error::from)
+    }
+
+    fn write(&mut self, offset: u64, data: Vec<u8>) -> Result<usize> {
+        let real_size = data.len();
+        if real_size > 0 {
+            self.process
+                .virt_mem
+                .virt_write_raw(offset.into(), &data[0..real_size])
+                .data_part()
+                .map_err(Error::from)?;
+            Ok(real_size)
+        } else {
+            Err(Error::Other(
+                "cannot write past the module dump file size".to_string(),
+            ))
+        }
     }
 }
 

@@ -2,7 +2,7 @@ mod connection;
 use connection::PhysicalDumpFile;
 
 mod process;
-use process::{ProcessInfoFile, ProcessMemoryMaps, ProcessMiniDump};
+use process::{ProcessDumpFile, ProcessInfoFile, ProcessMemoryMaps, ProcessMiniDump};
 
 mod module;
 use module::{ModuleDumpFile, ModulePeFolder};
@@ -183,6 +183,7 @@ impl FileSystemEntry for ProcessFolder {
         Some(self.children.get_or_insert(|| {
             vec![
                 Box::new(ProcessInfoFile::new(&self.pi)),
+                Box::new(ProcessDumpFile::new(self.kernel.clone(), self.pi.clone())),
                 Box::new(ProcessMemoryMaps::new(self.kernel.clone(), self.pi.clone())),
                 Box::new(ProcessMiniDump::new(self.kernel.clone(), self.pi.clone())),
                 Box::new(ModuleRootFolder::new(self.kernel.clone(), self.pi.clone())),
