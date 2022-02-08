@@ -10,11 +10,13 @@ members = [
     "memflow-daemon",
     "memflow-client",
     "memflow-cli",
+    "memflow-framework",
     "memflow-daemon-connector",
 ]
 default-members = [
     "memflow-daemon",
     "memflow-client",
     "memflow-cli",
+    "memflow-framework",
     "memflow-daemon-connector",
 ]
