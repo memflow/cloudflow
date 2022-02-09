@@ -3,7 +3,7 @@
 debug = true
 
 [profile.release]
-lto = true
+#lto = true
 
 [workspace]
 members = [
@@ -12,6 +12,7 @@ members = [
     "memflow-cli",
     "memflow-framework",
     "memflow-daemon-connector",
+    "memflow-node",
 ]
 default-members = [
     "memflow-daemon",
@@ -19,4 +20,5 @@ default-members = [
     "memflow-cli",
     "memflow-framework",
     "memflow-daemon-connector",
+    "memflow-node",
 ]
