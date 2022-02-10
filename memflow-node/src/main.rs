@@ -30,7 +30,7 @@ impl TreeItem for TreeNode {
     }
 }
 
-fn build_tree(node: &mut Node, path: &mut Vec<String>, tree: &mut TreeNode) -> Result<()> {
+fn build_tree(node: &Node, path: &mut Vec<String>, tree: &mut TreeNode) -> Result<()> {
     if let TreeNode::Branch(_, children) = tree {
         for (p, is_branch) in node.list(&path.join("/"))? {
             let n = if is_branch {
@@ -51,13 +51,15 @@ fn build_tree(node: &mut Node, path: &mut Vec<String>, tree: &mut TreeNode) -> R
 }
 
 fn main() -> Result<()> {
-    let mut node = Node::default();
+    let node = Node::default();
 
     let mut root = TreeNode::Branch("/".into(), vec![]);
 
-    build_tree(&mut node, &mut vec![], &mut root)?;
+    build_tree(&node, &mut vec![], &mut root)?;
 
     print_tree(&root)?;
+
+    let handle = node.open("os/native/rpc")?;
 
     Ok(())
 }

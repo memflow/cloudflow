@@ -2,8 +2,12 @@ use abi_stable::{
     abi_stability::check_layout_compatibility, std_types::UTypeId, type_layout::TypeLayout,
     StableAbi,
 };
+use cglue::result::from_int_result_empty;
 use cglue::trait_group::c_void;
+use dashmap::mapref::entry;
+use dashmap::DashMap;
 use memflow::prelude::v1::*;
+use sharded_slab::{Entry, Slab};
 use std::collections::{BTreeMap, HashMap};
 
 /*pub struct ManualArc<T> {
@@ -12,10 +16,10 @@ use std::collections::{BTreeMap, HashMap};
 
 pub enum HandleMap {
     Forward(usize, usize),
-    Object(Box<dyn FileOps>),
+    Object(FileOpsObj<c_void>),
 }
 
-pub type MappingFunction<T, O> = for<'a> fn(&'a mut T) -> Option<O>;
+pub type MappingFunction<T, O> = for<'a> fn(&'a T) -> Option<O>;
 
 pub enum Mapping<T> {
     Branch(MappingFunction<T, Box<dyn Branch>>), //BranchArcBox<'static>>),
@@ -39,43 +43,44 @@ pub struct PluginStore {
     ///
     /// Calling the mapping functions manually is inherently unsafe, because the types are meant to
     /// be opaque, and unchecked downcasting is being performed.
-    entry_list: Vec<(&'static TypeLayout, BTreeMap<String, OpaqueMapping>)>,
+    entry_list: Slab<DashMap<String, OpaqueMapping>>,
+    /// Type layouts identified by slab index.
+    layouts: DashMap<usize, &'static TypeLayout>,
     /// Map a specific type to opaque entries in the list.
-    type_map: HashMap<UTypeId, usize>,
+    type_map: DashMap<UTypeId, usize>,
 }
 
 impl PluginStore {
-    pub fn entries<T: StableAbi>(&mut self) -> &mut BTreeMap<String, Mapping<T>> {
+    pub fn entries<T: StableAbi>(&self) -> Entry<DashMap<String, Mapping<T>>> {
         let id = T::ABI_CONSTS.type_id.get();
 
         let idx = *self.type_map.entry(id).or_insert_with(|| {
-            self.entry_list
+            self.layouts
                 .iter()
-                .enumerate()
-                .find(|(_, (layout, _))| check_layout_compatibility(T::LAYOUT, layout).is_ok())
-                .map(|(i, _)| i)
-                .unwrap_or(self.entry_list.len())
+                .find(|p| check_layout_compatibility(T::LAYOUT, p.value()).is_ok())
+                .map(|p| *p.key())
+                .or_else(|| {
+                    self.entry_list.insert(Default::default()).map(|i| {
+                        self.layouts.insert(i, T::LAYOUT);
+                        i
+                    })
+                })
+                .expect("Slab is full!")
         });
 
-        if idx == self.entry_list.len() {
-            self.entry_list.push((T::LAYOUT, Default::default()));
-        }
-
-        unsafe {
-            (&mut self.entry_list[idx].1 as *mut _ as *mut BTreeMap<String, Mapping<T>>)
-                .as_mut()
-                .unwrap()
-        }
+        unsafe { std::mem::transmute(self.entry_list.get(idx).unwrap()) }
     }
 
-    pub fn register_mapping<T: StableAbi>(&mut self, name: &str, mapping: Mapping<T>) -> bool {
+    pub fn register_mapping<T: StableAbi>(&self, name: &str, mapping: Mapping<T>) -> bool {
         let entries = self.entries::<T>();
 
-        if entries.contains_key(name) {
-            false
-        } else {
-            entries.insert(name.to_string(), mapping);
+        let entry = entries.entry(name.to_string());
+
+        if matches!(entry, entry::Entry::Vacant(_)) {
+            entry.or_insert(mapping);
             true
+        } else {
+            false
         }
     }
 }
@@ -93,7 +98,14 @@ impl Default for Node {
 
         plugins.register_mapping(
             "rpc",
-            Mapping::Leaf(|os: &mut OsInstanceArcBox<'static>| Some(Box::new(os.clone()) as _)),
+            Mapping::Leaf(|os: &OsInstanceArcBox<'static>| Some(Box::new(os.clone()) as _)),
+        );
+
+        plugins.register_mapping(
+            "rpc",
+            Mapping::Leaf(|conn: &ConnectorInstanceArcBox<'static>| {
+                Some(Box::new(conn.clone()) as _)
+            }),
         );
 
         Self {
@@ -106,53 +118,55 @@ impl Default for Node {
 
 impl Frontend for Node {
     /// Perform read operation on the given handle
-    fn read(&mut self, handle: usize, data: CIterator<ReadData>) -> Result<()> {
+    fn read(&self, handle: usize, data: CIterator<ReadData>) -> Result<()> {
         self.backend.read(handle, data)
     }
     /// Perform write operation on the given handle.
-    fn write(&mut self, handle: usize, data: CIterator<WriteData>) -> Result<()> {
+    fn write(&self, handle: usize, data: CIterator<WriteData>) -> Result<()> {
         self.backend.write(handle, data)
     }
     /// Perform remote procedure call on the given handle.
-    fn rpc(&mut self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()> {
+    fn rpc(&self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()> {
         self.backend.rpc(handle, input, output)
     }
     /// Open a leaf at the given path. The result is a handle.
-    fn open(&mut self, path: &str) -> Result<usize> {
-        self.backend.open(path, &mut self.plugins)
+    fn open(&self, path: &str) -> Result<usize> {
+        self.backend.open(path, &self.plugins)
     }
     /// List entries in the given path. It is a (name, is_branch) pair.
-    fn list(&mut self, path: &str) -> Result<Vec<(String, bool)>> {
-        self.backend.list(path, &mut self.plugins)
+    fn list(&self, path: &str) -> Result<Vec<(String, bool)>> {
+        self.backend.list(path, &self.plugins)
     }
 }
 
 pub struct NodeBackend {
-    backends: Vec<Box<dyn Backend>>,
+    backends: Slab<Box<dyn Backend>>,
     /// Maps backend name to backend ID in the vec
-    backend_map: HashMap<String, usize>,
+    backend_map: DashMap<String, usize>,
     /// Maps handle to (backend, handle) pair.
-    handles: Vec<HandleMap>,
+    handles: Slab<HandleMap>,
 }
 
 impl Default for NodeBackend {
     fn default() -> Self {
         let mut ret = Self {
-            backends: vec![],
+            backends: Slab::new(),
             backend_map: Default::default(),
-            handles: vec![],
+            handles: Slab::new(),
         };
 
-        ret.add_backend(
-            "connector",
-            LocalBackend::<ConnectorInstanceArcBox>::default(),
-        );
-
-        let mut os = LocalBackend::<OsInstanceArcBox>::default();
+        let connector = LocalBackend::<ConnectorInstanceArcBox>::default();
 
         let inventory = Inventory::scan();
-        let native = inventory.create_os("native", None, None).unwrap();
 
+        let kcore = inventory.create_connector("kcore", None, None).unwrap();
+        connector.insert("kcore", kcore);
+
+        ret.add_backend("connector", connector);
+
+        let os = LocalBackend::<OsInstanceArcBox>::default();
+
+        let native = inventory.create_os("native", None, None).unwrap();
         os.insert("native", native);
 
         ret.add_backend("os", os);
@@ -162,70 +176,91 @@ impl Default for NodeBackend {
 }
 
 impl NodeBackend {
-    fn add_backend(&mut self, name: &str, backend: impl Backend + 'static) {
+    fn add_backend(&self, name: &str, backend: impl Backend + 'static) {
         let name = name.to_string();
-        if self.backend_map.get(&name).is_none()
-            && self.backend_map.insert(name, self.backends.len()).is_none()
-        {
-            self.backends.push(Box::new(backend) as _);
-        }
+
+        self.backend_map.entry(name.to_string()).or_insert_with(|| {
+            self.backends
+                .insert(Box::new(backend) as _)
+                .expect("Slab is full!")
+        });
     }
 }
 
 impl Backend for NodeBackend {
-    fn read(&mut self, handle: usize, data: CIterator<ReadData>) -> Result<()> {
-        match self.handles.get_mut(handle) {
-            Some(&mut HandleMap::Forward(backend, handle)) if backend < self.backends.len() => {
-                self.backends[backend].read(handle, data)
+    fn read(&self, handle: usize, data: CIterator<ReadData>) -> Result<()> {
+        match self.handles.get(handle).as_ref().map(|v| &**v) {
+            Some(&HandleMap::Forward(backend, handle)) => {
+                if let Some(backend) = self.backends.get(backend) {
+                    backend.read(handle, data)
+                } else {
+                    Err(ErrorKind::InvalidPath.into())
+                }
             }
             Some(HandleMap::Object(obj)) => obj.read(data),
             _ => Err(ErrorKind::NotFound.into()),
         }
     }
 
-    fn write(&mut self, handle: usize, data: CIterator<WriteData>) -> Result<()> {
-        match self.handles.get_mut(handle) {
-            Some(&mut HandleMap::Forward(backend, handle)) if backend < self.backends.len() => {
-                self.backends[backend].write(handle, data)
+    fn write(&self, handle: usize, data: CIterator<WriteData>) -> Result<()> {
+        match self.handles.get(handle).as_ref().map(|v| &**v) {
+            Some(&HandleMap::Forward(backend, handle)) => {
+                if let Some(backend) = self.backends.get(backend) {
+                    backend.write(handle, data)
+                } else {
+                    Err(ErrorKind::InvalidPath.into())
+                }
             }
             Some(HandleMap::Object(obj)) => obj.write(data),
             _ => Err(ErrorKind::NotFound.into()),
         }
     }
 
-    fn rpc(&mut self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()> {
-        match self.handles.get_mut(handle) {
-            Some(&mut HandleMap::Forward(backend, handle)) if backend < self.backends.len() => {
-                self.backends[backend].rpc(handle, input, output)
+    fn rpc(&self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()> {
+        match self.handles.get(handle).as_ref().map(|v| &**v) {
+            Some(&HandleMap::Forward(backend, handle)) => {
+                if let Some(backend) = self.backends.get(backend) {
+                    backend.rpc(handle, input, output)
+                } else {
+                    Err(ErrorKind::InvalidPath.into())
+                }
             }
             Some(HandleMap::Object(obj)) => obj.rpc(input, output),
             _ => Err(ErrorKind::NotFound.into()),
         }
     }
 
-    fn open(&mut self, path: &str, plugins: &mut PluginStore) -> Result<usize> {
+    fn open(&self, path: &str, plugins: &PluginStore) -> Result<usize> {
         if let Some((backend, path)) = path.split_once("/") {
-            if let Some(&idx) = self.backend_map.get(backend) {
-                return self.backends[idx].open(path, plugins);
+            if let Some(backend) = self
+                .backend_map
+                .get(backend)
+                .and_then(|idx| self.backends.get(*idx))
+            {
+                return backend.open(path, plugins);
             }
         }
 
         Err(ErrorKind::NotFound.into())
     }
 
-    fn list(&mut self, path: &str, plugins: &mut PluginStore) -> Result<Vec<(String, bool)>> {
+    fn list(&self, path: &str, plugins: &PluginStore) -> Result<Vec<(String, bool)>> {
         let path = path.trim_start_matches('/');
         let (backend, path) = path.split_once("/").unwrap_or((path, ""));
 
         if !backend.is_empty() {
-            if let Some(&idx) = self.backend_map.get(backend) {
-                return self.backends[idx].list(path, plugins);
+            if let Some(backend) = self
+                .backend_map
+                .get(backend)
+                .and_then(|idx| self.backends.get(*idx))
+            {
+                return backend.list(path, plugins);
             }
         } else {
             return Ok(self
                 .backend_map
-                .keys()
-                .cloned()
+                .iter()
+                .map(|r| r.key().clone())
                 .map(|k| (k, true))
                 .collect());
         }
@@ -235,15 +270,15 @@ impl Backend for NodeBackend {
 }
 
 struct LocalBackend<T> {
-    entries: HashMap<String, T>,
-    handle_objs: Vec<Box<dyn FileOps>>,
+    entries: DashMap<String, T>,
+    handle_objs: Slab<FileOpsObj<c_void>>,
 }
 
 impl<T> Default for LocalBackend<T> {
     fn default() -> Self {
         Self {
             entries: Default::default(),
-            handle_objs: vec![],
+            handle_objs: Slab::new(),
         }
     }
 }
@@ -252,60 +287,66 @@ impl<T> Default for LocalBackend<T> {
 //}
 
 impl<T> LocalBackend<T> {
-    pub fn insert(&mut self, name: &str, entry: T) -> bool {
+    pub fn insert(&self, name: &str, entry: T) -> bool {
         if self.entries.contains_key(name) {
             false
         } else {
             self.entries.insert(name.into(), entry).is_none()
         }
     }
+
+    fn push_obj(&self, obj: FileOpsObj<c_void>) -> usize {
+        self.handle_objs.insert(obj).unwrap()
+    }
 }
 
 impl<T: Branch> Backend for LocalBackend<T> {
-    fn read(&mut self, handle: usize, data: CIterator<ReadData>) -> Result<()> {
-        match self.handle_objs.get_mut(handle) {
+    fn read(&self, handle: usize, data: CIterator<ReadData>) -> Result<()> {
+        match self.handle_objs.get(handle) {
             Some(f) => f.read(data),
             _ => Err(ErrorKind::NotFound.into()),
         }
     }
 
-    fn write(&mut self, handle: usize, data: CIterator<WriteData>) -> Result<()> {
-        match self.handle_objs.get_mut(handle) {
+    fn write(&self, handle: usize, data: CIterator<WriteData>) -> Result<()> {
+        match self.handle_objs.get(handle) {
             Some(f) => f.write(data),
             _ => Err(ErrorKind::NotFound.into()),
         }
     }
 
-    fn rpc(&mut self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()> {
-        match self.handle_objs.get_mut(handle) {
+    fn rpc(&self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()> {
+        match self.handle_objs.get(handle) {
             Some(f) => f.rpc(input, output),
             _ => Err(ErrorKind::NotFound.into()),
         }
     }
 
-    fn open(&mut self, path: &str, plugins: &mut PluginStore) -> Result<usize> {
+    fn open(&self, path: &str, plugins: &PluginStore) -> Result<usize> {
         let (branch, path) = path.split_once("/").unwrap_or((path, ""));
         match self
             .entries
-            .get_mut(branch)
+            .get(branch)
             .and_then(|b| Some(b.get_entry(path, plugins)))
         {
-            Some(Ok(DirEntry::Leaf(mut leaf))) => {
-                self.handle_objs.push(leaf.open()?);
-                Ok(self.handle_objs.len() - 1)
-            }
+            Some(Ok(DirEntry::Leaf(leaf))) => leaf.open().map(|o| self.push_obj(o)),
             Some(Ok(_)) => Err(ErrorKind::InvalidArgument.into()),
             Some(Err(e)) => Err(e),
             _ => Err(ErrorKind::NotFound.into()),
         }
     }
 
-    fn list(&mut self, path: &str, plugins: &mut PluginStore) -> Result<Vec<(String, bool)>> {
+    fn list(&self, path: &str, plugins: &PluginStore) -> Result<Vec<(String, bool)>> {
         if path.is_empty() {
-            Ok(self.entries.keys().cloned().map(|n| (n, true)).collect())
+            Ok(self
+                .entries
+                .iter()
+                .map(|r| r.key().clone())
+                .map(|n| (n, true))
+                .collect())
         } else {
             let (branch, path) = path.split_once("/").unwrap_or((path, ""));
-            match self.entries.get_mut(branch) {
+            match self.entries.get(branch) {
                 Some(branch) => Ok(branch
                     .list_recurse(path, plugins)?
                     .into_iter()
@@ -319,35 +360,35 @@ impl<T: Branch> Backend for LocalBackend<T> {
 
 pub trait Backend {
     /// Perform read operation on the given handle
-    fn read(&mut self, handle: usize, data: CIterator<ReadData>) -> Result<()>;
+    fn read(&self, handle: usize, data: CIterator<ReadData>) -> Result<()>;
     /// Perform write operation on the given handle.
-    fn write(&mut self, handle: usize, data: CIterator<WriteData>) -> Result<()>;
+    fn write(&self, handle: usize, data: CIterator<WriteData>) -> Result<()>;
     /// Perform remote procedure call on the given handle.
-    fn rpc(&mut self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()>;
+    fn rpc(&self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()>;
     /// Open a leaf at the given path. The result is a handle.
-    fn open(&mut self, path: &str, plugins: &mut PluginStore) -> Result<usize>;
+    fn open(&self, path: &str, plugins: &PluginStore) -> Result<usize>;
     /// List entries in the given path. It is a (name, is_branch) pair.
-    fn list(&mut self, path: &str, plugins: &mut PluginStore) -> Result<Vec<(String, bool)>>;
+    fn list(&self, path: &str, plugins: &PluginStore) -> Result<Vec<(String, bool)>>;
 }
 
 pub trait Frontend {
     /// Perform read operation on the given handle
-    fn read(&mut self, handle: usize, data: CIterator<ReadData>) -> Result<()>;
+    fn read(&self, handle: usize, data: CIterator<ReadData>) -> Result<()>;
     /// Perform write operation on the given handle.
-    fn write(&mut self, handle: usize, data: CIterator<WriteData>) -> Result<()>;
+    fn write(&self, handle: usize, data: CIterator<WriteData>) -> Result<()>;
     /// Perform remote procedure call on the given handle.
-    fn rpc(&mut self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()>;
+    fn rpc(&self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()>;
     /// Open a leaf at the given path. The result is a handle.
-    fn open(&mut self, path: &str) -> Result<usize>;
+    fn open(&self, path: &str) -> Result<usize>;
     /// List entries in the given path. It is a (name, is_branch) pair.
-    fn list(&mut self, path: &str) -> Result<Vec<(String, bool)>>;
+    fn list(&self, path: &str) -> Result<Vec<(String, bool)>>;
 }
 
 fn branch_map_entry<T: Branch>(
-    branch: &mut T,
+    branch: &T,
     entry: Mapping<T>,
     remote: Option<&str>,
-    plugins: &mut PluginStore,
+    plugins: &PluginStore,
 ) -> Result<DirEntry> {
     match (remote, entry) {
         (Some(path), Mapping::Branch(map)) => map(branch)
@@ -362,9 +403,9 @@ fn branch_map_entry<T: Branch>(
 }
 
 fn branch_get_entry<T: Branch + StableAbi>(
-    branch: &mut T,
+    branch: &T,
     path: &str,
-    plugins: &mut PluginStore,
+    plugins: &PluginStore,
 ) -> Result<DirEntry> {
     let (local, remote) = path
         .split_once("/")
@@ -373,14 +414,14 @@ fn branch_get_entry<T: Branch + StableAbi>(
 
     let entries = plugins.entries::<T>();
 
-    let entry = entries.get_mut(local).ok_or(ErrorKind::NotFound)?;
+    let entry = entries.get(local).ok_or(ErrorKind::NotFound)?;
 
     branch_map_entry(branch, *entry, remote, plugins)
 }
 
 fn branch_list<T: Branch + StableAbi>(
-    branch: &mut T,
-    plugins: &mut PluginStore,
+    branch: &T,
+    plugins: &PluginStore,
 ) -> Result<HashMap<String, DirEntry>> {
     // TODO: do without clone
     let entries = plugins.entries::<T>().clone();
@@ -394,74 +435,66 @@ fn branch_list<T: Branch + StableAbi>(
 }
 
 impl Branch for ConnectorInstanceArcBox<'static> {
-    fn get_entry(&mut self, path: &str, plugins: &mut PluginStore) -> Result<DirEntry> {
+    fn get_entry(&self, path: &str, plugins: &PluginStore) -> Result<DirEntry> {
         branch_get_entry(self, path, plugins)
     }
 
-    fn list(&mut self, plugins: &mut PluginStore) -> Result<HashMap<String, DirEntry>> {
+    fn list(&self, plugins: &PluginStore) -> Result<HashMap<String, DirEntry>> {
         branch_list(self, plugins)
     }
 }
 
 impl Leaf for ConnectorInstanceArcBox<'static> {
-    fn open(&mut self) -> Result<Box<dyn FileOps>> {
-        Ok(Box::new(self.clone()) as _)
+    fn open(&self) -> Result<FileOpsObj<c_void>> {
+        Ok(FileOpsObj::new(
+            CBox::from(self.clone()),
+            Some(conn_read),
+            Some(conn_write),
+            Some(conn_rpc),
+        ))
     }
 }
 
-impl FileOps for ConnectorInstanceArcBox<'static> {
-    fn read(&mut self, data: CIterator<ReadData>) -> Result<()> {
-        self.phys_view()
-            .read_raw_iter(data, &mut (&mut |_: ReadData| true).into())
-    }
+extern "C" fn conn_read(conn: &ConnectorInstanceArcBox<'static>, data: CIterator<ReadData>) -> i32 {
+    //conn.phys_view()
+    //    .read_raw_iter(data, &mut (&mut |_: ReadData| true).into()).into_int_result()
+    Result::Ok(()).into_int_result()
+}
 
-    fn write(&mut self, data: CIterator<WriteData>) -> Result<()> {
-        self.phys_view()
-            .write_raw_iter(data, &mut (&mut |_: WriteData| true).into())
-    }
+extern "C" fn conn_write(
+    conn: &ConnectorInstanceArcBox<'static>,
+    data: CIterator<WriteData>,
+) -> i32 {
+    //conn.phys_view()
+    //    .write_raw_iter(data, &mut (&mut |_: WriteData| true).into()).into_int_result()
+    Result::Ok(()).into_int_result()
+}
 
-    fn rpc(&mut self, input: &[u8], output: &mut [u8]) -> Result<()> {
-        Ok(())
-    }
+extern "C" fn conn_rpc(
+    conn: &ConnectorInstanceArcBox<'static>,
+    input: CSliceRef<u8>,
+    output: CSliceMut<u8>,
+) -> i32 {
+    Result::Ok(()).into_int_result()
 }
 
 impl Branch for OsInstanceArcBox<'static> {
-    fn get_entry(&mut self, path: &str, plugins: &mut PluginStore) -> Result<DirEntry> {
+    fn get_entry(&self, path: &str, plugins: &PluginStore) -> Result<DirEntry> {
         branch_get_entry(self, path, plugins)
     }
 
-    fn list(&mut self, plugins: &mut PluginStore) -> Result<HashMap<String, DirEntry>> {
+    fn list(&self, plugins: &PluginStore) -> Result<HashMap<String, DirEntry>> {
         branch_list(self, plugins)
     }
 }
 
 impl Leaf for OsInstanceArcBox<'static> {
-    fn open(&mut self) -> Result<Box<dyn FileOps>> {
-        Ok(Box::new(self.clone()) as _)
-    }
-}
-
-impl FileOps for OsInstanceArcBox<'static> {
-    fn read(&mut self, data: CIterator<ReadData>) -> Result<()> {
-        Ok(())
-    }
-
-    fn write(&mut self, data: CIterator<WriteData>) -> Result<()> {
-        Ok(())
-    }
-
-    fn rpc(&mut self, input: &[u8], output: &mut [u8]) -> Result<()> {
-        Ok(())
+    fn open(&self) -> Result<FileOpsObj<c_void>> {
+        Ok(FileOpsObj::new(CBox::from(self.clone()), None, None, None))
     }
 }
 
 // Internal FS representation. Does not cross backends.
-
-pub trait FileOps {
-    fn read(&mut self, data: CIterator<ReadData>) -> Result<()>;
-    fn write(&mut self, data: CIterator<WriteData>) -> Result<()>;
-    fn rpc(&mut self, input: &[u8], output: &mut [u8]) -> Result<()>;
-}
 
 pub enum DirEntry {
     Branch(Box<dyn Branch>),
@@ -470,14 +503,10 @@ pub enum DirEntry {
 
 //#[cglue_trait]
 pub trait Branch {
-    fn get_entry(&mut self, path: &str, plugins: &mut PluginStore) -> Result<DirEntry>;
-    fn list(&mut self, plugins: &mut PluginStore) -> Result<HashMap<String, DirEntry>>;
+    fn get_entry(&self, path: &str, plugins: &PluginStore) -> Result<DirEntry>;
+    fn list(&self, plugins: &PluginStore) -> Result<HashMap<String, DirEntry>>;
 
-    fn list_recurse(
-        &mut self,
-        path: &str,
-        plugins: &mut PluginStore,
-    ) -> Result<HashMap<String, DirEntry>> {
+    fn list_recurse(&self, path: &str, plugins: &PluginStore) -> Result<HashMap<String, DirEntry>> {
         if path.is_empty() {
             self.list(plugins)
         } else {
@@ -490,7 +519,63 @@ pub trait Branch {
     }
 }
 
+pub struct FileOpsObj<T: 'static> {
+    obj: CBox<'static, T>,
+    read: Option<for<'a> extern "C" fn(&'a T, data: CIterator<ReadData>) -> i32>,
+    write: Option<for<'a> extern "C" fn(&'a T, data: CIterator<WriteData>) -> i32>,
+    rpc: Option<
+        for<'a> extern "C" fn(&'a T, input: CSliceRef<'a, u8>, output: CSliceMut<'a, u8>) -> i32,
+    >,
+}
+
+impl<T> FileOpsObj<T> {
+    pub fn new(
+        obj: CBox<'static, T>,
+        read: Option<for<'a> extern "C" fn(&'a T, data: CIterator<ReadData>) -> i32>,
+        write: Option<for<'a> extern "C" fn(&'a T, data: CIterator<WriteData>) -> i32>,
+        rpc: Option<
+            for<'a> extern "C" fn(
+                &'a T,
+                input: CSliceRef<'a, u8>,
+                output: CSliceMut<'a, u8>,
+            ) -> i32,
+        >,
+    ) -> FileOpsObj<c_void> {
+        Self {
+            obj,
+            read,
+            write,
+            rpc,
+        }
+        .into_opaque()
+    }
+
+    pub fn read(&self, data: CIterator<ReadData>) -> Result<()> {
+        from_int_result_empty((self.read.ok_or(ErrorKind::NotImplemented)?)(
+            &*self.obj, data,
+        ))
+    }
+
+    pub fn write(&self, data: CIterator<WriteData>) -> Result<()> {
+        from_int_result_empty((self.write.ok_or(ErrorKind::NotImplemented)?)(
+            &*self.obj, data,
+        ))
+    }
+
+    pub fn rpc(&self, input: &[u8], output: &mut [u8]) -> Result<()> {
+        from_int_result_empty((self.rpc.ok_or(ErrorKind::NotImplemented)?)(
+            &*self.obj,
+            input.into(),
+            output.into(),
+        ))
+    }
+}
+
+unsafe impl<T> cglue::trait_group::Opaquable for FileOpsObj<T> {
+    type OpaqueTarget = FileOpsObj<c_void>;
+}
+
 //#[cglue_trait]
 pub trait Leaf {
-    fn open(&mut self) -> Result<Box<dyn FileOps>>;
+    fn open(&self) -> Result<FileOpsObj<c_void>>;
 }

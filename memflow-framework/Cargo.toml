@@ -9,3 +9,5 @@ edition = "2021"
 memflow = { git = "https://github.com/memflow/memflow", branch = "next" }
 abi_stable = "0.10"
 cglue = { version = ">=0.2.5", git = "https://github.com/h33p/cglue", branch = "main", default-features = false }
+dashmap = "5"
+sharded-slab = "0.1"
