@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 memflow = { git = "https://github.com/memflow/memflow", branch = "next" }
 abi_stable = "0.10"
-cglue = { version = ">=0.2.5", git = "https://github.com/h33p/cglue", branch = "main", default-features = false }
+cglue = { version = ">=0.2.5", git = "https://github.com/h33p/cglue", branch = "main", default-features = false, features = ["layout_checks"] }
 dashmap = "5"
 sharded-slab = "0.1"
 crossbeam-deque = "0.8"

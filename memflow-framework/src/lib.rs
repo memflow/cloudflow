@@ -18,21 +18,31 @@ use std::collections::{BTreeMap, HashMap};
 
 }*/
 
+#[derive(StableAbi)]
+#[repr(C)]
 pub enum HandleMap {
     Forward(usize, usize),
     Object(FileOpsObj<c_void>),
 }
 
-pub type MappingFunction<T, O> = for<'a> fn(&'a T) -> Option<O>;
+pub type MappingFunction<T, O> = extern "C" fn(&T) -> COption<O>;
 
-pub enum Mapping<T> {
-    Branch(MappingFunction<T, Box<dyn Branch>>), //BranchArcBox<'static>>),
-    Leaf(MappingFunction<T, Box<dyn Leaf>>),     //LeafArcBox<'static>>)
+#[derive(StableAbi)]
+// TODO: Why does the func type not work??
+#[sabi(unsafe_opaque_fields)]
+#[repr(C)]
+pub enum Mapping<T: StableAbi> {
+    Branch(MappingFunction<T, BranchBox<'static>>), //BranchBox<'static>>),
+    Leaf(MappingFunction<T, LeafBox<'static>>),     //LeafBox<'static>>)
 }
 
-impl<T> Copy for Mapping<T> {}
+unsafe impl<T: StableAbi> Opaquable for Mapping<T> {
+    type OpaqueTarget = Mapping<c_void>;
+}
 
-impl<T> Clone for Mapping<T> {
+impl<T: StableAbi> Copy for Mapping<T> {}
+
+impl<T: StableAbi> Clone for Mapping<T> {
     fn clone(&self) -> Self {
         *self
     }
@@ -54,29 +64,191 @@ pub struct PluginStore {
     type_map: DashMap<UTypeId, usize>,
 }
 
-impl PluginStore {
-    pub fn entries<T: StableAbi>(&self) -> Entry<DashMap<String, Mapping<T>>> {
-        let id = T::ABI_CONSTS.type_id.get();
+#[derive(StableAbi)]
+#[repr(C)]
+pub struct ListEntry {
+    pub name: ReprCString,
+    pub is_branch: bool,
+}
 
+impl ListEntry {
+    fn new(name: ReprCString, is_branch: bool) -> Self {
+        Self { name, is_branch }
+    }
+}
+
+#[derive(StableAbi)]
+#[repr(C)]
+pub struct CTup2<A, B>(pub A, pub B);
+
+#[derive(StableAbi)]
+#[repr(C)]
+pub struct CPluginStore {
+    store: CBox<'static, c_void>,
+    lookup_entry: for<'a> unsafe extern "C" fn(
+        &'a c_void,
+        UTypeId,
+        &'static TypeLayout,
+        CSliceRef<'a, u8>,
+    ) -> COption<OpaqueMapping>,
+    entry_list: for<'a> unsafe extern "C" fn(
+        &'a c_void,
+        UTypeId,
+        &'static TypeLayout,
+        &mut OpaqueCallback<*const c_void>,
+    ),
+    register_mapping: for<'a> unsafe extern "C" fn(
+        &'a c_void,
+        UTypeId,
+        &'static TypeLayout,
+        CSliceRef<'a, u8>,
+        OpaqueMapping,
+    ) -> bool,
+}
+
+impl Default for CPluginStore {
+    fn default() -> Self {
+        PluginStore::default().into()
+    }
+}
+
+impl From<PluginStore> for CPluginStore {
+    fn from(store: PluginStore) -> Self {
+        unsafe extern "C" fn lookup_entry(
+            store: &c_void,
+            id: UTypeId,
+            layout: &'static TypeLayout,
+            name: CSliceRef<u8>,
+        ) -> COption<OpaqueMapping> {
+            let store = store as *const _ as *const PluginStore;
+            let entries = (*store).entries_raw(id, layout);
+            entries.get(name.into_str()).map(|e| *e).into()
+        }
+
+        unsafe extern "C" fn entry_list<'a>(
+            store: &c_void,
+            id: UTypeId,
+            layout: &'static TypeLayout,
+            out: &mut OpaqueCallback<*const c_void>,
+        ) {
+            let store: &PluginStore = &*(store as *const _ as *const PluginStore);
+            let entries = (*store).entries_raw(id, layout);
+            entries
+                .iter()
+                .take_while(|e| {
+                    out.call(
+                        &CTup2(CSliceRef::from(e.key().as_str()), *e.value()) as *const _
+                            as *const c_void,
+                    )
+                })
+                .for_each(|_| {});
+        }
+
+        unsafe extern "C" fn register_mapping(
+            store: &c_void,
+            id: UTypeId,
+            layout: &'static TypeLayout,
+            name: CSliceRef<u8>,
+            mapping: OpaqueMapping,
+        ) -> bool {
+            let store = store as *const _ as *const PluginStore;
+            (*store).register_mapping_raw(id, layout, name.into_str(), mapping)
+        }
+
+        Self {
+            store: CBox::from(store).into_opaque(),
+            lookup_entry,
+            entry_list,
+            register_mapping,
+        }
+    }
+}
+
+impl CPluginStore {
+    pub fn register_mapping<T: StableAbi>(&self, name: &str, mapping: Mapping<T>) -> bool {
+        unsafe {
+            (self.register_mapping)(
+                &*self.store,
+                T::ABI_CONSTS.type_id.get(),
+                T::LAYOUT,
+                name.into(),
+                mapping.into_opaque(),
+            )
+        }
+    }
+
+    pub fn lookup_entry<T: StableAbi>(&self, name: &str) -> Option<Mapping<T>> {
+        let mapping: Option<OpaqueMapping> = unsafe {
+            (self.lookup_entry)(
+                &*self.store,
+                T::ABI_CONSTS.type_id.get(),
+                T::LAYOUT,
+                name.into(),
+            )
+        }
+        .into();
+        unsafe { core::mem::transmute(mapping) }
+    }
+
+    pub fn entry_list<'a, T: StableAbi>(
+        &'a self,
+        mut callback: OpaqueCallback<(&'a str, &'a Mapping<T>)>,
+    ) {
+        let cb = &mut move |data: *const c_void| {
+            let CTup2(a, b): &CTup2<CSliceRef<'a, u8>, OpaqueMapping> =
+                unsafe { &*(data as *const c_void as *const _) };
+            callback.call((unsafe { a.into_str() }, unsafe {
+                &*(b as *const OpaqueMapping as *const Mapping<T>)
+            }))
+        };
+
+        unsafe {
+            (self.entry_list)(
+                &*self.store,
+                T::ABI_CONSTS.type_id.get(),
+                T::LAYOUT,
+                &mut cb.into(),
+            )
+        };
+    }
+}
+
+impl PluginStore {
+    pub unsafe fn entries_raw(
+        &self,
+        id: UTypeId,
+        layout: &'static TypeLayout,
+    ) -> Entry<DashMap<String, OpaqueMapping>> {
         let idx = *self.type_map.entry(id).or_insert_with(|| {
             self.layouts
                 .iter()
-                .find(|p| check_layout_compatibility(T::LAYOUT, p.value()).is_ok())
+                .find(|p| check_layout_compatibility(layout, p.value()).is_ok())
                 .map(|p| *p.key())
                 .or_else(|| {
                     self.entry_list.insert(Default::default()).map(|i| {
-                        self.layouts.insert(i, T::LAYOUT);
+                        self.layouts.insert(i, layout);
                         i
                     })
                 })
                 .expect("Slab is full!")
         });
 
-        unsafe { std::mem::transmute(self.entry_list.get(idx).unwrap()) }
+        self.entry_list.get(idx).unwrap()
     }
 
-    pub fn register_mapping<T: StableAbi>(&self, name: &str, mapping: Mapping<T>) -> bool {
-        let entries = self.entries::<T>();
+    pub fn entries<T: StableAbi>(&self) -> Entry<DashMap<String, Mapping<T>>> {
+        let id = T::ABI_CONSTS.type_id.get();
+        unsafe { std::mem::transmute(self.entries_raw(id, T::LAYOUT)) }
+    }
+
+    pub unsafe fn register_mapping_raw(
+        &self,
+        id: UTypeId,
+        layout: &'static TypeLayout,
+        name: &str,
+        mapping: OpaqueMapping,
+    ) -> bool {
+        let entries = self.entries_raw(id, layout);
 
         let entry = entries.entry(name.to_string());
 
@@ -87,27 +259,44 @@ impl PluginStore {
             false
         }
     }
+
+    pub fn register_mapping<T: StableAbi>(&self, name: &str, mapping: Mapping<T>) -> bool {
+        unsafe {
+            self.register_mapping_raw(
+                T::ABI_CONSTS.type_id.get(),
+                T::LAYOUT,
+                name,
+                mapping.into_opaque(),
+            )
+        }
+    }
 }
 
 pub struct Node {
     backend: NodeBackend,
-    frontends: Vec<Box<dyn Frontend>>,
-    plugins: PluginStore,
+    frontends: Vec<FrontendArcBox<'static>>,
+    plugins: CPluginStore,
 }
 
 impl Default for Node {
     fn default() -> Self {
         let backend = NodeBackend::default();
-        let plugins = PluginStore::default();
+        let plugins = CPluginStore::default();
+
+        extern "C" fn self_as_leaf<T: Leaf + Into<LeafBaseBox<'static, T>> + Clone + 'static>(
+            obj: &T,
+        ) -> COption<LeafBox<'static>> {
+            COption::Some(trait_obj!(obj.clone() as Leaf))
+        }
 
         plugins.register_mapping(
-            "rpc",
-            Mapping::Leaf(|os: &OsInstanceArcBox<'static>| Some(Box::new(os.clone()) as _)),
+            "os",
+            Mapping::Leaf(self_as_leaf::<OsInstanceArcBox<'static>>),
         );
 
         plugins.register_mapping(
-            "rpc",
-            Mapping::Leaf(|conn: &CArc<ThreadedConnector>| Some(Box::new(conn.clone()) as _)),
+            "mem",
+            Mapping::Leaf(self_as_leaf::<CArc<ThreadedConnector>>),
         );
 
         Self {
@@ -136,13 +325,13 @@ impl Frontend for Node {
         self.backend.open(path, &self.plugins)
     }
     /// List entries in the given path. It is a (name, is_branch) pair.
-    fn list(&self, path: &str) -> Result<Vec<(String, bool)>> {
-        self.backend.list(path, &self.plugins)
+    fn list(&self, path: &str, out: &mut OpaqueCallback<ListEntry>) -> Result<()> {
+        self.backend.list(path, &self.plugins, out)
     }
 }
 
 pub struct NodeBackend {
-    backends: Slab<Box<dyn Backend>>,
+    backends: Slab<BackendBox<'static>>,
     /// Maps backend name to backend ID in the vec
     backend_map: DashMap<String, usize>,
     /// Maps handle to (backend, handle) pair.
@@ -183,7 +372,7 @@ impl NodeBackend {
 
         self.backend_map.entry(name.to_string()).or_insert_with(|| {
             self.backends
-                .insert(Box::new(backend) as _)
+                .insert(trait_obj!(backend as Backend))
                 .expect("Slab is full!")
         });
     }
@@ -232,7 +421,7 @@ impl Backend for NodeBackend {
         }
     }
 
-    fn open(&self, path: &str, plugins: &PluginStore) -> Result<usize> {
+    fn open(&self, path: &str, plugins: &CPluginStore) -> Result<usize> {
         if let Some((backend, path)) = path.split_once("/") {
             if let Some((bid, backend)) = self
                 .backend_map
@@ -248,7 +437,12 @@ impl Backend for NodeBackend {
         Err(ErrorKind::NotFound.into())
     }
 
-    fn list(&self, path: &str, plugins: &PluginStore) -> Result<Vec<(String, bool)>> {
+    fn list(
+        &self,
+        path: &str,
+        plugins: &CPluginStore,
+        out: &mut OpaqueCallback<ListEntry>,
+    ) -> Result<()> {
         let path = path.trim_start_matches('/');
         let (backend, path) = path.split_once("/").unwrap_or((path, ""));
 
@@ -258,15 +452,15 @@ impl Backend for NodeBackend {
                 .get(backend)
                 .and_then(|idx| self.backends.get(*idx))
             {
-                return backend.list(path, plugins);
+                return backend.list(path, plugins, out);
             }
         } else {
-            return Ok(self
-                .backend_map
+            self.backend_map
                 .iter()
                 .map(|r| r.key().clone())
-                .map(|k| (k, true))
-                .collect());
+                .map(|k| ListEntry::new(k.into(), true))
+                .feed_into_mut(out);
+            return Ok(());
         }
 
         Err(ErrorKind::NotFound.into())
@@ -326,7 +520,7 @@ impl<T: Branch> Backend for LocalBackend<T> {
         }
     }
 
-    fn open(&self, path: &str, plugins: &PluginStore) -> Result<usize> {
+    fn open(&self, path: &str, plugins: &CPluginStore) -> Result<usize> {
         let (branch, path) = path.split_once("/").unwrap_or((path, ""));
         match self
             .entries
@@ -340,28 +534,41 @@ impl<T: Branch> Backend for LocalBackend<T> {
         }
     }
 
-    fn list(&self, path: &str, plugins: &PluginStore) -> Result<Vec<(String, bool)>> {
+    fn list(
+        &self,
+        path: &str,
+        plugins: &CPluginStore,
+        out: &mut OpaqueCallback<ListEntry>,
+    ) -> Result<()> {
         if path.is_empty() {
-            Ok(self
-                .entries
+            self.entries
                 .iter()
                 .map(|r| r.key().clone())
-                .map(|n| (n, true))
-                .collect())
+                .map(|n| ListEntry::new(n.into(), true))
+                .feed_into_mut(out);
+
+            Ok(())
         } else {
             let (branch, path) = path.split_once("/").unwrap_or((path, ""));
             match self.entries.get(branch) {
-                Some(branch) => Ok(branch
-                    .list_recurse(path, plugins)?
-                    .into_iter()
-                    .map(|(name, obj)| (name, matches!(obj, DirEntry::Branch(_))))
-                    .collect()),
+                Some(branch) => {
+                    let cb = &mut |entry: BranchListEntry| {
+                        out.call(ListEntry::new(
+                            entry.name.into(),
+                            matches!(entry.obj, DirEntry::Branch(_)),
+                        ))
+                    };
+
+                    branch.list_recurse(path, plugins, &mut cb.into())
+                }
                 _ => Err(ErrorKind::NotFound.into()),
             }
         }
     }
 }
 
+#[cglue_trait]
+#[int_result]
 pub trait Backend {
     /// Perform read operation on the given handle
     fn read(&self, handle: usize, data: CIterator<ReadData>) -> Result<()>;
@@ -370,11 +577,18 @@ pub trait Backend {
     /// Perform remote procedure call on the given handle.
     fn rpc(&self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()>;
     /// Open a leaf at the given path. The result is a handle.
-    fn open(&self, path: &str, plugins: &PluginStore) -> Result<usize>;
+    fn open(&self, path: &str, plugins: &CPluginStore) -> Result<usize>;
     /// List entries in the given path. It is a (name, is_branch) pair.
-    fn list(&self, path: &str, plugins: &PluginStore) -> Result<Vec<(String, bool)>>;
+    fn list(
+        &self,
+        path: &str,
+        plugins: &CPluginStore,
+        out: &mut OpaqueCallback<ListEntry>,
+    ) -> Result<()>;
 }
 
+#[cglue_trait]
+#[int_result]
 pub trait Frontend {
     /// Perform read operation on the given handle
     fn read(&self, handle: usize, data: CIterator<ReadData>) -> Result<()>;
@@ -385,23 +599,26 @@ pub trait Frontend {
     /// Open a leaf at the given path. The result is a handle.
     fn open(&self, path: &str) -> Result<usize>;
     /// List entries in the given path. It is a (name, is_branch) pair.
-    fn list(&self, path: &str) -> Result<Vec<(String, bool)>>;
+    fn list(&self, path: &str, out: &mut OpaqueCallback<ListEntry>) -> Result<()>;
 }
 
-fn branch_map_entry<T: Branch>(
+fn branch_map_entry<T: Branch + StableAbi>(
     branch: &T,
     entry: Mapping<T>,
     remote: Option<&str>,
-    plugins: &PluginStore,
+    plugins: &CPluginStore,
 ) -> Result<DirEntry> {
     match (remote, entry) {
         (Some(path), Mapping::Branch(map)) => map(branch)
-            .ok_or(ErrorKind::NotFound)?
+            .as_ref()
+            .ok_or::<ErrorKind>(ErrorKind::NotFound)?
             .get_entry(path, plugins),
-        (None, Mapping::Branch(map)) => {
-            Ok(DirEntry::Branch(map(branch).ok_or(ErrorKind::NotFound)?))
-        }
-        (None, Mapping::Leaf(map)) => Ok(DirEntry::Leaf(map(branch).ok_or(ErrorKind::NotFound)?)),
+        (None, Mapping::Branch(map)) => Ok(DirEntry::Branch(
+            Option::from(map(branch)).ok_or(ErrorKind::NotFound)?,
+        )),
+        (None, Mapping::Leaf(map)) => Ok(DirEntry::Leaf(
+            Option::from(map(branch)).ok_or(ErrorKind::NotFound)?,
+        )),
         _ => Err(ErrorKind::NotFound.into()),
     }
 }
@@ -409,42 +626,55 @@ fn branch_map_entry<T: Branch>(
 fn branch_get_entry<T: Branch + StableAbi>(
     branch: &T,
     path: &str,
-    plugins: &PluginStore,
+    plugins: &CPluginStore,
 ) -> Result<DirEntry> {
     let (local, remote) = path
         .split_once("/")
         .map(|(a, b)| (a, Some(b)))
         .unwrap_or((path, None));
 
-    let entries = plugins.entries::<T>();
+    let entry = plugins
+        .lookup_entry::<T>(local)
+        .ok_or(ErrorKind::NotFound)?;
 
-    let entry = entries.get(local).ok_or(ErrorKind::NotFound)?;
-
-    branch_map_entry(branch, *entry, remote, plugins)
+    branch_map_entry(branch, entry, remote, plugins)
 }
 
 fn branch_list<T: Branch + StableAbi>(
     branch: &T,
-    plugins: &PluginStore,
+    plugins: &CPluginStore,
 ) -> Result<HashMap<String, DirEntry>> {
-    // TODO: do without clone
-    let entries = plugins.entries::<T>().clone();
+    let mut ret = vec![];
 
-    entries
-        .into_iter()
-        .map(|(name, entry)| {
-            branch_map_entry(branch, entry, None, plugins).map(|entry| (name, entry))
+    plugins.entry_list::<T>(
+        (&mut |(name, entry): (&str, &Mapping<T>)| {
+            ret.push(
+                branch_map_entry(branch, *entry, None, plugins)
+                    .map(|entry| (name.to_string(), entry)),
+            );
+            true
         })
-        .collect()
+            .into(),
+    );
+
+    ret.into_iter().collect()
 }
 
 impl Branch for CArc<ThreadedConnector> {
-    fn get_entry(&self, path: &str, plugins: &PluginStore) -> Result<DirEntry> {
+    fn get_entry(&self, path: &str, plugins: &CPluginStore) -> Result<DirEntry> {
         branch_get_entry(self, path, plugins)
     }
 
-    fn list(&self, plugins: &PluginStore) -> Result<HashMap<String, DirEntry>> {
-        branch_list(self, plugins)
+    fn list(
+        &self,
+        plugins: &CPluginStore,
+        out: &mut OpaqueCallback<BranchListEntry>,
+    ) -> Result<()> {
+        branch_list(self, plugins)?
+            .into_iter()
+            .map(|(name, entry)| BranchListEntry::new(name.into(), entry))
+            .feed_into_mut(out);
+        Ok(())
     }
 }
 
@@ -595,12 +825,20 @@ impl From<ConnectorInstanceArcBox<'static>> for ThreadedConnector {
 }
 
 impl Branch for OsInstanceArcBox<'static> {
-    fn get_entry(&self, path: &str, plugins: &PluginStore) -> Result<DirEntry> {
+    fn get_entry(&self, path: &str, plugins: &CPluginStore) -> Result<DirEntry> {
         branch_get_entry(self, path, plugins)
     }
 
-    fn list(&self, plugins: &PluginStore) -> Result<HashMap<String, DirEntry>> {
-        branch_list(self, plugins)
+    fn list(
+        &self,
+        plugins: &CPluginStore,
+        out: &mut OpaqueCallback<BranchListEntry>,
+    ) -> Result<()> {
+        branch_list(self, plugins)?
+            .into_iter()
+            .map(|(name, entry)| BranchListEntry::new(name.into(), entry))
+            .feed_into_mut(out);
+        Ok(())
     }
 }
 
@@ -612,22 +850,44 @@ impl Leaf for OsInstanceArcBox<'static> {
 
 // Internal FS representation. Does not cross backends.
 
+#[repr(C)]
+#[derive(StableAbi)]
 pub enum DirEntry {
-    Branch(Box<dyn Branch>),
-    Leaf(Box<dyn Leaf>),
+    Branch(BranchBox<'static>),
+    Leaf(LeafBox<'static>),
 }
 
-//#[cglue_trait]
-pub trait Branch {
-    fn get_entry(&self, path: &str, plugins: &PluginStore) -> Result<DirEntry>;
-    fn list(&self, plugins: &PluginStore) -> Result<HashMap<String, DirEntry>>;
+#[repr(C)]
+#[derive(StableAbi)]
+pub struct BranchListEntry {
+    pub name: ReprCString,
+    pub obj: DirEntry,
+}
 
-    fn list_recurse(&self, path: &str, plugins: &PluginStore) -> Result<HashMap<String, DirEntry>> {
+impl BranchListEntry {
+    fn new(name: ReprCString, obj: DirEntry) -> Self {
+        Self { name, obj }
+    }
+}
+
+#[cglue_trait]
+#[int_result]
+pub trait Branch {
+    fn get_entry(&self, path: &str, plugins: &CPluginStore) -> Result<DirEntry>;
+    fn list(&self, plugins: &CPluginStore, out: &mut OpaqueCallback<BranchListEntry>)
+        -> Result<()>;
+
+    fn list_recurse(
+        &self,
+        path: &str,
+        plugins: &CPluginStore,
+        out: &mut OpaqueCallback<BranchListEntry>,
+    ) -> Result<()> {
         if path.is_empty() {
-            self.list(plugins)
+            self.list(plugins, out)
         } else {
             match self.get_entry(path, plugins) {
-                Ok(DirEntry::Branch(mut branch)) => branch.list(plugins),
+                Ok(DirEntry::Branch(mut branch)) => branch.list(plugins, out),
                 Ok(_) => Err(ErrorKind::InvalidPath.into()),
                 Err(e) => Err(e),
             }
@@ -635,6 +895,8 @@ pub trait Branch {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, StableAbi)]
 pub struct FileOpsObj<T: 'static> {
     obj: CArc<T>,
     read: Option<for<'a> extern "C" fn(&'a T, data: CIterator<ReadData>) -> i32>,
@@ -693,7 +955,8 @@ unsafe impl<T> cglue::trait_group::Opaquable for FileOpsObj<T> {
     type OpaqueTarget = FileOpsObj<c_void>;
 }
 
-//#[cglue_trait]
+#[cglue_trait]
+#[int_result]
 pub trait Leaf {
     fn open(&self) -> Result<FileOpsObj<c_void>>;
 }

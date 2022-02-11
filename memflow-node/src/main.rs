@@ -1,7 +1,12 @@
 use anyhow::Result;
+use memflow::prelude::v1::*;
 use memflow_framework::*;
 use ptree::{print_tree, Style, TreeItem};
+use rand::{Rng, SeedableRng};
+use rand_xorshift::XorShiftRng as CurRng;
 use std::borrow::Cow;
+use std::io::Write;
+use std::time::{Duration, Instant};
 
 #[derive(Clone)]
 enum TreeNode {
@@ -32,22 +37,181 @@ impl TreeItem for TreeNode {
 
 fn build_tree(node: &Node, path: &mut Vec<String>, tree: &mut TreeNode) -> Result<()> {
     if let TreeNode::Branch(_, children) = tree {
-        for (p, is_branch) in node.list(&path.join("/"))? {
-            let n = if is_branch {
-                let mut n = TreeNode::Branch(p.clone(), vec![]);
-                path.push(p);
-                build_tree(node, path, &mut n)?;
-                path.pop();
-                n
-            } else {
-                TreeNode::Leaf(p)
-            };
+        node.list(
+            &path.join("/"),
+            &mut (&mut |data: ListEntry| {
+                let p = data.name.to_string();
+                let is_branch = data.is_branch;
 
-            children.push(n);
-        }
+                let n = if is_branch {
+                    let mut n = TreeNode::Branch(p.clone(), vec![]);
+                    path.push(p);
+                    let _ = build_tree(node, path, &mut n).unwrap();
+                    path.pop();
+                    n
+                } else {
+                    TreeNode::Leaf(p)
+                };
+
+                children.push(n);
+
+                true
+            })
+                .into(),
+        )?;
     }
 
     Ok(())
+}
+
+fn rwtest2(
+    mem: &mut impl MemoryView,
+    addr: Address,
+    chunk_sizes: &[usize],
+    chunk_counts: &[usize],
+    read_size: usize,
+) {
+    let mut rng = CurRng::seed_from_u64(0);
+
+    println!("Performance bench:");
+    print!("{:#7}", "SIZE");
+
+    for i in chunk_counts {
+        print!(", x{:02x} mb/s, x{:02x} calls/s", *i, *i);
+    }
+
+    println!();
+
+    let start = Instant::now();
+    let mut ttdur = Duration::new(0, 0);
+
+    for i in chunk_sizes {
+        print!("0x{:05x}", *i);
+        for o in chunk_counts {
+            let mut done_size = 0_usize;
+            let mut total_dur = Duration::new(0, 0);
+            let mut calls = 0;
+            let mut bufs = vec![(vec![0_u8; *i], 0); *o];
+
+            let base_addr = addr.to_umem();
+
+            // This code will increase the read size for higher number of chunks
+            // Since optimized vtop should scale very well with chunk sizes.
+            assert!((i.trailing_zeros() as usize) < usize::MAX);
+            let chunk_multiplier = *o * (i.trailing_zeros() as usize + 1);
+
+            while done_size < read_size * chunk_multiplier {
+                let mut read_data = vec![];
+
+                for (buf, addr) in bufs.iter_mut() {
+                    *addr = base_addr + rng.gen_range(0..0x1000);
+                    read_data.push(MemData(Address::from(*addr), buf.as_mut_slice().into()));
+                }
+
+                let mut iter = read_data.into_iter();
+
+                let now = Instant::now();
+                mem.read_raw_iter((&mut iter).into(), &mut (&mut |_| true).into())
+                    .expect("Failure");
+                total_dur += now.elapsed();
+                done_size += *i * *o;
+                calls += 1;
+            }
+
+            ttdur += total_dur;
+            let total_time = total_dur.as_secs_f64();
+
+            print!(
+                ", {:8.2}, {:11.2}",
+                (done_size / 0x0010_0000) as f64 / total_time,
+                calls as f64 / total_time
+            );
+            std::io::stdout().flush().expect("");
+        }
+        println!();
+    }
+
+    let total_dur = start.elapsed();
+    println!(
+        "Total bench time: {:.2} {:.2}",
+        total_dur.as_secs_f64(),
+        ttdur.as_secs_f64()
+    );
+}
+
+fn rwtest(
+    frontend: &impl Frontend,
+    handle: usize,
+    addr: Address,
+    chunk_sizes: &[usize],
+    chunk_counts: &[usize],
+    read_size: usize,
+) {
+    let mut rng = CurRng::seed_from_u64(0);
+
+    println!("Performance bench:");
+    print!("{:#7}", "SIZE");
+
+    for i in chunk_counts {
+        print!(", x{:02x} mb/s, x{:02x} calls/s", *i, *i);
+    }
+
+    println!();
+
+    let start = Instant::now();
+    let mut ttdur = Duration::new(0, 0);
+
+    for i in chunk_sizes {
+        print!("0x{:05x}", *i);
+        for o in chunk_counts {
+            let mut done_size = 0_usize;
+            let mut total_dur = Duration::new(0, 0);
+            let mut calls = 0;
+            let mut bufs = vec![(vec![0_u8; *i], 0); *o];
+
+            let base_addr = addr.to_umem();
+
+            // This code will increase the read size for higher number of chunks
+            // Since optimized vtop should scale very well with chunk sizes.
+            assert!((i.trailing_zeros() as usize) < usize::MAX);
+            let chunk_multiplier = *o * (i.trailing_zeros() as usize + 1);
+
+            while done_size < read_size * chunk_multiplier {
+                let mut read_data = vec![];
+
+                for (buf, addr) in bufs.iter_mut() {
+                    *addr = base_addr + rng.gen_range(0..0x1000);
+                    read_data.push(MemData(Address::from(*addr), buf.as_mut_slice().into()));
+                }
+
+                let mut iter = read_data.into_iter();
+
+                let now = Instant::now();
+                frontend.read(handle, (&mut iter).into()).expect("Failure");
+                total_dur += now.elapsed();
+                done_size += *i * *o;
+                calls += 1;
+            }
+
+            ttdur += total_dur;
+            let total_time = total_dur.as_secs_f64();
+
+            print!(
+                ", {:8.2}, {:11.2}",
+                (done_size / 0x0010_0000) as f64 / total_time,
+                calls as f64 / total_time
+            );
+            std::io::stdout().flush().expect("");
+        }
+        println!();
+    }
+
+    let total_dur = start.elapsed();
+    println!(
+        "Total bench time: {:.2} {:.2}",
+        total_dur.as_secs_f64(),
+        ttdur.as_secs_f64()
+    );
 }
 
 fn main() -> Result<()> {
@@ -63,14 +227,14 @@ fn main() -> Result<()> {
 
     print_tree(&root)?;
 
-    let handle = node.open("connector/kcore/rpc")?;
+    let handle = node.open("connector/kcore/mem")?;
 
     println!("Handle: {:x}", handle);
 
     let mut buf = vec![0; 4096];
 
     let mut iter = std::iter::once(MemData(
-        Address::from(0x160e10000u64),
+        Address::from(0x329e10000u64),
         CSliceMut::from(buf.as_mut_slice()),
     ));
 
@@ -84,6 +248,25 @@ fn main() -> Result<()> {
     }
 
     println!();
+
+    rwtest(
+        &node,
+        handle,
+        Address::from(0x329e10000u64),
+        &[0x10000, 0x1000, 0x100, 0x10, 0x8],
+        &[32, 8, 1],
+        0x0010_0000,
+    );
+
+    rwtest2(
+        &mut Inventory::scan()
+            .create_connector("kcore", None, None)?
+            .into_phys_view(),
+        Address::from(0x329e10000u64),
+        &[0x10000, 0x1000, 0x100, 0x10, 0x8],
+        &[32, 8, 1],
+        0x0010_0000,
+    );
 
     Ok(())
 }

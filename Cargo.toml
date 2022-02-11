@@ -3,7 +3,8 @@
 debug = true
 
 [profile.release]
-#lto = true
+lto = true
+debug = true
 
 [workspace]
 members = [
