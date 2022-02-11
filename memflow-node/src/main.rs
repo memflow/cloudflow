@@ -51,7 +51,11 @@ fn build_tree(node: &Node, path: &mut Vec<String>, tree: &mut TreeNode) -> Resul
 }
 
 fn main() -> Result<()> {
+    println!("Create node");
+
     let node = Node::default();
+
+    println!("List tree");
 
     let mut root = TreeNode::Branch("/".into(), vec![]);
 
@@ -59,7 +63,27 @@ fn main() -> Result<()> {
 
     print_tree(&root)?;
 
-    let handle = node.open("os/native/rpc")?;
+    let handle = node.open("connector/kcore/rpc")?;
+
+    println!("Handle: {:x}", handle);
+
+    let mut buf = vec![0; 4096];
+
+    let mut iter = std::iter::once(MemData(
+        Address::from(0x160e10000u64),
+        CSliceMut::from(buf.as_mut_slice()),
+    ));
+
+    let iter = (&mut iter).into();
+
+    node.read(handle, iter)?;
+
+    for chunk in buf.chunks(8) {
+        let v = u64::from_ne_bytes(<[u8; 8]>::try_from(chunk).unwrap());
+        print!("{:x}, ", v);
+    }
+
+    println!();
 
     Ok(())
 }

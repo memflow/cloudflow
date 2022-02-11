@@ -3,10 +3,14 @@ use abi_stable::{
     StableAbi,
 };
 use cglue::result::from_int_result_empty;
+pub use cglue::slice::CSliceMut;
 use cglue::trait_group::c_void;
+use core::mem::MaybeUninit;
 use dashmap::mapref::entry;
 use dashmap::DashMap;
+pub use memflow::mem::MemData;
 use memflow::prelude::v1::*;
+pub use memflow::types::Address;
 use sharded_slab::{Entry, Slab};
 use std::collections::{BTreeMap, HashMap};
 
@@ -94,7 +98,7 @@ pub struct Node {
 impl Default for Node {
     fn default() -> Self {
         let backend = NodeBackend::default();
-        let mut plugins = PluginStore::default();
+        let plugins = PluginStore::default();
 
         plugins.register_mapping(
             "rpc",
@@ -103,9 +107,7 @@ impl Default for Node {
 
         plugins.register_mapping(
             "rpc",
-            Mapping::Leaf(|conn: &ConnectorInstanceArcBox<'static>| {
-                Some(Box::new(conn.clone()) as _)
-            }),
+            Mapping::Leaf(|conn: &CArc<ThreadedConnector>| Some(Box::new(conn.clone()) as _)),
         );
 
         Self {
@@ -155,12 +157,12 @@ impl Default for NodeBackend {
             handles: Slab::new(),
         };
 
-        let connector = LocalBackend::<ConnectorInstanceArcBox>::default();
+        let connector = LocalBackend::<CArc<ThreadedConnector>>::default();
 
         let inventory = Inventory::scan();
 
         let kcore = inventory.create_connector("kcore", None, None).unwrap();
-        connector.insert("kcore", kcore);
+        connector.insert("kcore", ThreadedConnector::from(kcore).into());
 
         ret.add_backend("connector", connector);
 
@@ -232,12 +234,14 @@ impl Backend for NodeBackend {
 
     fn open(&self, path: &str, plugins: &PluginStore) -> Result<usize> {
         if let Some((backend, path)) = path.split_once("/") {
-            if let Some(backend) = self
+            if let Some((bid, backend)) = self
                 .backend_map
                 .get(backend)
-                .and_then(|idx| self.backends.get(*idx))
+                .and_then(|idx| self.backends.get(*idx).map(|b| (*idx, b)))
             {
-                return backend.open(path, plugins);
+                let ret = backend.open(path, plugins)?;
+                self.handles.insert(HandleMap::Forward(bid, ret));
+                return Ok(ret);
             }
         }
 
@@ -434,7 +438,7 @@ fn branch_list<T: Branch + StableAbi>(
         .collect()
 }
 
-impl Branch for ConnectorInstanceArcBox<'static> {
+impl Branch for CArc<ThreadedConnector> {
     fn get_entry(&self, path: &str, plugins: &PluginStore) -> Result<DirEntry> {
         branch_get_entry(self, path, plugins)
     }
@@ -444,38 +448,150 @@ impl Branch for ConnectorInstanceArcBox<'static> {
     }
 }
 
-impl Leaf for ConnectorInstanceArcBox<'static> {
+impl Leaf for CArc<ThreadedConnector> {
     fn open(&self) -> Result<FileOpsObj<c_void>> {
         Ok(FileOpsObj::new(
-            CBox::from(self.clone()),
-            Some(conn_read),
-            Some(conn_write),
-            Some(conn_rpc),
+            self.clone(),
+            Some(ThreadedConnector::read),
+            Some(ThreadedConnector::write),
+            Some(ThreadedConnector::rpc),
         ))
     }
 }
 
-extern "C" fn conn_read(conn: &ConnectorInstanceArcBox<'static>, data: CIterator<ReadData>) -> i32 {
-    //conn.phys_view()
-    //    .read_raw_iter(data, &mut (&mut |_: ReadData| true).into()).into_int_result()
-    Result::Ok(()).into_int_result()
+#[derive(StableAbi)]
+#[repr(C)]
+pub struct ThreadCtx<T: 'static> {
+    orig: T,
+    stack: CBox<'static, c_void>,
+    stack_push: for<'a> extern "C" fn(&c_void, COption<T>),
+    stack_pop: for<'a> extern "C" fn(&c_void, &mut MaybeUninit<COption<T>>) -> bool,
 }
 
-extern "C" fn conn_write(
-    conn: &ConnectorInstanceArcBox<'static>,
-    data: CIterator<WriteData>,
-) -> i32 {
-    //conn.phys_view()
-    //    .write_raw_iter(data, &mut (&mut |_: WriteData| true).into()).into_int_result()
-    Result::Ok(()).into_int_result()
+pub struct ThreadCtxHandle<'a, T: 'static> {
+    value: MaybeUninit<T>,
+    ctx: &'a ThreadCtx<T>,
 }
 
-extern "C" fn conn_rpc(
-    conn: &ConnectorInstanceArcBox<'static>,
-    input: CSliceRef<u8>,
-    output: CSliceMut<u8>,
-) -> i32 {
-    Result::Ok(()).into_int_result()
+impl<T> Drop for ThreadCtxHandle<'_, T> {
+    fn drop(&mut self) {
+        self.ctx.push(Some(unsafe { self.value.as_ptr().read() }))
+    }
+}
+
+impl<T> core::ops::Deref for ThreadCtxHandle<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.value.as_ptr().as_ref().unwrap() }
+    }
+}
+
+impl<T> core::ops::DerefMut for ThreadCtxHandle<'_, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { self.value.as_mut_ptr().as_mut().unwrap() }
+    }
+}
+
+impl<T> ThreadCtx<T> {
+    pub fn new(orig: T, size: usize) -> Self {
+        // SAFETY: All types in the opaque functions match!!! It is safe, but needs care!!!
+
+        let stack = crossbeam_deque::Worker::<COption<T>>::new_lifo();
+
+        for _ in 0..size {
+            stack.push(COption::None);
+        }
+
+        let stack = CBox::from(stack).into_opaque();
+
+        extern "C" fn stack_pop<T>(stack: &c_void, out: &mut MaybeUninit<COption<T>>) -> bool {
+            match unsafe {
+                (*(stack as *const _ as *const crossbeam_deque::Worker<COption<T>>)).pop()
+            } {
+                Some(t) => {
+                    out.write(t);
+                    true
+                }
+                None => false,
+            }
+        }
+
+        extern "C" fn stack_push<T>(stack: &c_void, val: COption<T>) {
+            unsafe {
+                (*(stack as *const _ as *const crossbeam_deque::Worker<COption<T>>)).push(val)
+            };
+        }
+
+        Self {
+            orig,
+            stack,
+            stack_pop: stack_pop::<T>,
+            stack_push: stack_push::<T>,
+        }
+    }
+
+    fn push(&self, val: Option<T>) {
+        (self.stack_push)(&*self.stack, val.into())
+    }
+
+    fn pop(&self) -> Option<Option<T>> {
+        let mut out = MaybeUninit::uninit();
+        if (self.stack_pop)(&*self.stack, &mut out) {
+            Some(unsafe { out.assume_init() }.into())
+        } else {
+            None
+        }
+    }
+}
+
+impl<T: Clone> ThreadCtx<T> {
+    pub fn get(&self) -> ThreadCtxHandle<T> {
+        let v = loop {
+            match self.pop() {
+                Some(Some(v)) => break v,
+                Some(None) => break self.orig.clone(),
+                None => {}
+            }
+        };
+
+        ThreadCtxHandle {
+            value: MaybeUninit::new(v),
+            ctx: self,
+        }
+    }
+}
+
+#[derive(StableAbi)]
+#[repr(C)]
+pub struct ThreadedConnector(ThreadCtx<ConnectorInstanceArcBox<'static>>);
+
+impl ThreadedConnector {
+    extern "C" fn read(&self, data: CIterator<ReadData>) -> i32 {
+        self.0
+            .get()
+            .phys_view()
+            .read_raw_iter(data, &mut (&mut |_: ReadData| true).into())
+            .into_int_result()
+    }
+
+    extern "C" fn write(&self, data: CIterator<WriteData>) -> i32 {
+        self.0
+            .get()
+            .phys_view()
+            .write_raw_iter(data, &mut (&mut |_: WriteData| true).into())
+            .into_int_result()
+    }
+
+    extern "C" fn rpc(&self, input: CSliceRef<u8>, output: CSliceMut<u8>) -> i32 {
+        Result::Ok(()).into_int_result()
+    }
+}
+
+impl From<ConnectorInstanceArcBox<'static>> for ThreadedConnector {
+    fn from(conn: ConnectorInstanceArcBox<'static>) -> Self {
+        Self(ThreadCtx::new(conn, 32))
+    }
 }
 
 impl Branch for OsInstanceArcBox<'static> {
@@ -490,7 +606,7 @@ impl Branch for OsInstanceArcBox<'static> {
 
 impl Leaf for OsInstanceArcBox<'static> {
     fn open(&self) -> Result<FileOpsObj<c_void>> {
-        Ok(FileOpsObj::new(CBox::from(self.clone()), None, None, None))
+        Ok(FileOpsObj::new(CArc::from(self.clone()), None, None, None))
     }
 }
 
@@ -520,7 +636,7 @@ pub trait Branch {
 }
 
 pub struct FileOpsObj<T: 'static> {
-    obj: CBox<'static, T>,
+    obj: CArc<T>,
     read: Option<for<'a> extern "C" fn(&'a T, data: CIterator<ReadData>) -> i32>,
     write: Option<for<'a> extern "C" fn(&'a T, data: CIterator<WriteData>) -> i32>,
     rpc: Option<
@@ -530,7 +646,7 @@ pub struct FileOpsObj<T: 'static> {
 
 impl<T> FileOpsObj<T> {
     pub fn new(
-        obj: CBox<'static, T>,
+        obj: CArc<T>,
         read: Option<for<'a> extern "C" fn(&'a T, data: CIterator<ReadData>) -> i32>,
         write: Option<for<'a> extern "C" fn(&'a T, data: CIterator<WriteData>) -> i32>,
         rpc: Option<
@@ -552,19 +668,21 @@ impl<T> FileOpsObj<T> {
 
     pub fn read(&self, data: CIterator<ReadData>) -> Result<()> {
         from_int_result_empty((self.read.ok_or(ErrorKind::NotImplemented)?)(
-            &*self.obj, data,
+            self.obj.as_ref().unwrap(),
+            data,
         ))
     }
 
     pub fn write(&self, data: CIterator<WriteData>) -> Result<()> {
         from_int_result_empty((self.write.ok_or(ErrorKind::NotImplemented)?)(
-            &*self.obj, data,
+            self.obj.as_ref().unwrap(),
+            data,
         ))
     }
 
     pub fn rpc(&self, input: &[u8], output: &mut [u8]) -> Result<()> {
         from_int_result_empty((self.rpc.ok_or(ErrorKind::NotImplemented)?)(
-            &*self.obj,
+            self.obj.as_ref().unwrap(),
             input.into(),
             output.into(),
         ))
