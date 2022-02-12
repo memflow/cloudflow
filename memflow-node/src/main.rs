@@ -1,5 +1,6 @@
 use anyhow::Result;
-use memflow::prelude::v1::*;
+use filer::prelude::v1::*;
+use memflow::prelude::v1::{Address, *};
 use memflow_framework::*;
 use ptree::{print_tree, Style, TreeItem};
 use rand::{Rng, SeedableRng};
@@ -142,7 +143,7 @@ fn rwtest2(
 fn rwtest(
     frontend: &impl Frontend,
     handle: usize,
-    addr: Address,
+    addr: filer::types::Address,
     chunk_sizes: &[usize],
     chunk_counts: &[usize],
     read_size: usize,
@@ -181,7 +182,7 @@ fn rwtest(
 
                 for (buf, addr) in bufs.iter_mut() {
                     *addr = base_addr + rng.gen_range(0..0x1000);
-                    read_data.push(MemData(Address::from(*addr), buf.as_mut_slice().into()));
+                    read_data.push(CTup2(*addr as _, buf.as_mut_slice().into()));
                 }
 
                 let mut iter = read_data.into_iter();
@@ -217,7 +218,7 @@ fn rwtest(
 fn main() -> Result<()> {
     println!("Create node");
 
-    let node = Node::default();
+    let node = create_node();
 
     println!("List tree");
 
@@ -233,10 +234,9 @@ fn main() -> Result<()> {
 
     let mut buf = vec![0; 4096];
 
-    let mut iter = std::iter::once(MemData(
-        Address::from(0x329e10000u64),
-        CSliceMut::from(buf.as_mut_slice()),
-    ));
+    let cr3 = 0x3dce10000u64;
+
+    let mut iter = std::iter::once(CTup2(cr3, CSliceMut::from(buf.as_mut_slice())));
 
     let iter = (&mut iter).into();
 
@@ -252,7 +252,7 @@ fn main() -> Result<()> {
     rwtest(
         &node,
         handle,
-        Address::from(0x329e10000u64),
+        cr3,
         &[0x10000, 0x1000, 0x100, 0x10, 0x8],
         &[32, 8, 1],
         0x0010_0000,
@@ -262,7 +262,7 @@ fn main() -> Result<()> {
         &mut Inventory::scan()
             .create_connector("kcore", None, None)?
             .into_phys_view(),
-        Address::from(0x329e10000u64),
+        cr3.into(),
         &[0x10000, 0x1000, 0x100, 0x10, 0x8],
         &[32, 8, 1],
         0x0010_0000,
