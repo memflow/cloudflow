@@ -143,7 +143,7 @@ fn rwtest2(
 fn rwtest(
     frontend: &impl Frontend,
     handle: usize,
-    addr: filer::types::Address,
+    addr: Size,
     chunk_sizes: &[usize],
     chunk_counts: &[usize],
     read_size: usize,

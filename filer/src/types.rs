@@ -17,10 +17,10 @@ impl<A, B> From<CTup2<A, B>> for (A, B) {
     }
 }
 
-pub type Address = u64;
+pub type Size = u64;
 
-pub type RWData<'a> = CTup2<Address, CSliceMut<'a, u8>>;
-pub type ROData<'a> = CTup2<Address, CSliceRef<'a, u8>>;
+pub type RWData<'a> = CTup2<Size, CSliceMut<'a, u8>>;
+pub type ROData<'a> = CTup2<Size, CSliceRef<'a, u8>>;
 
 pub trait ArcType: Sized + 'static {
     type ArcSelf: Into<CArc<Self>>;

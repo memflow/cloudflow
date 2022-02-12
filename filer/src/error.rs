@@ -177,7 +177,7 @@ pub type Result<T> = result::Result<T, Error>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cglue::result::{
+    use cglue::result::{
         from_int_result, from_int_result_empty, into_int_out_result, into_int_result, IntError,
     };
     use std::mem::MaybeUninit;
@@ -205,10 +205,10 @@ mod tests {
     #[test]
     pub fn error_to_from_i32() {
         let err = Error::from_int_err(
-            Error(ErrorOrigin::Other, ErrorKind::InvalidExeFile).into_int_err(),
+            Error(ErrorOrigin::Other, ErrorKind::InvalidArgument).into_int_err(),
         );
         assert_eq!(err.0, ErrorOrigin::Other);
-        assert_eq!(err.1, ErrorKind::InvalidExeFile);
+        assert_eq!(err.1, ErrorKind::InvalidArgument);
     }
 
     #[test]
@@ -229,20 +229,20 @@ mod tests {
 
     #[test]
     pub fn result_error_void_ffi() {
-        let r: Result<i32> = Err(Error(ErrorOrigin::Other, ErrorKind::InvalidExeFile));
+        let r: Result<i32> = Err(Error(ErrorOrigin::Other, ErrorKind::InvalidArgument));
         let result: Result<()> = from_int_result_empty(into_int_result(r));
         assert!(result.is_err());
         assert_eq!(result.err().unwrap().0, ErrorOrigin::Other);
-        assert_eq!(result.err().unwrap().1, ErrorKind::InvalidExeFile);
+        assert_eq!(result.err().unwrap().1, ErrorKind::InvalidArgument);
     }
 
     #[test]
     pub fn result_error_value_ffi() {
-        let r: Result<i32> = Err(Error(ErrorOrigin::Other, ErrorKind::InvalidExeFile));
+        let r: Result<i32> = Err(Error(ErrorOrigin::Other, ErrorKind::InvalidArgument));
         let mut out = MaybeUninit::<i32>::uninit();
         let result: Result<i32> = unsafe { from_int_result(into_int_out_result(r, &mut out), out) };
         assert!(result.is_err());
         assert_eq!(result.err().unwrap().0, ErrorOrigin::Other);
-        assert_eq!(result.err().unwrap().1, ErrorKind::InvalidExeFile);
+        assert_eq!(result.err().unwrap().1, ErrorKind::InvalidArgument);
     }
 }
