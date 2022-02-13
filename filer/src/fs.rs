@@ -10,6 +10,17 @@ use cglue::result::from_int_result_empty;
 pub use cglue::slice::CSliceMut;
 use cglue::trait_group::c_void;
 
+/// Safely wrap fallible functions to return a integer result value.
+///
+/// This is effectively needed when defining `extern "C"` functions that for file ops.
+#[macro_export]
+macro_rules! int_res_wrap {
+    ($expr:expr) => {
+        let __wrapped_fn = || -> $crate::error::Result<()> { $expr };
+        __wrapped_fn().into_int_result()
+    };
+}
+
 #[repr(C)]
 #[derive(StableAbi)]
 pub enum DirEntry {

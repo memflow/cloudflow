@@ -1,8 +1,77 @@
 use abi_stable::StableAbi;
+pub use cglue::arc::CArcSome;
 use cglue::prelude::v1::*;
 pub use cglue::slice::CSliceMut;
 use cglue::trait_group::c_void;
 use core::mem::MaybeUninit;
+
+/// Defines new threaded wrapper types.
+///
+/// This will define `$new` type which will contain `ThreadCtx<$type>`, as well as `$new_arc` type
+/// which is effectively `CArcSome<$new>`.
+///
+/// Typically, read/write/rpc operations would be implemented on `$new`, while `Branch`/`Leaf`
+/// traits would be implemented on `$new_arc`. This is done in such a way so that CGlue can nicely
+/// opaquify objects while not hiding reference counts from filesystem.
+#[macro_export]
+macro_rules! thread_types {
+    ($type:ty, $new:ident, $new_arc: ident) => {
+        $crate::thread_types!($type, $new, $new_arc, 32);
+    };
+    ($type:ty, $new:ident, $new_arc: ident, $threads:expr) => {
+        #[derive(StableAbi)]
+        #[repr(transparent)]
+        pub struct $new($crate::thread_ctx::ThreadCtx<$type>);
+
+        #[derive(Clone, StableAbi)]
+        #[repr(transparent)]
+        pub struct $new_arc($crate::thread_ctx::CArcSome<$new>);
+
+        impl $crate::types::ArcType for $new {
+            type ArcSelf = $new_arc;
+        }
+
+        impl From<$type> for $new {
+            fn from(input: $type) -> Self {
+                Self(ThreadCtx::new(input, $threads))
+            }
+        }
+
+        impl From<$type> for $new_arc {
+            fn from(input: $type) -> Self {
+                Self($new::from(input).into())
+            }
+        }
+
+        impl core::ops::Deref for $new {
+            type Target = $crate::thread_ctx::ThreadCtx<$type>;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl core::ops::Deref for $new_arc {
+            type Target = $crate::thread_ctx::CArcSome<$new>;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl From<$new_arc> for $crate::thread_ctx::CArcSome<$new> {
+            fn from($new_arc(arc): $new_arc) -> Self {
+                arc
+            }
+        }
+
+        impl From<$crate::thread_ctx::CArcSome<$new>> for $new_arc {
+            fn from(arc: $crate::thread_ctx::CArcSome<$new>) -> Self {
+                $new_arc(arc)
+            }
+        }
+    };
+}
 
 #[derive(StableAbi)]
 #[repr(C)]

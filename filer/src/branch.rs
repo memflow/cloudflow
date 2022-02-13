@@ -8,6 +8,12 @@ pub use cglue::slice::CSliceMut;
 
 use std::collections::HashMap;
 
+pub fn split_path(path: &str) -> (&str, Option<&str>) {
+    path.split_once("/")
+        .map(|(a, b)| (a, Some(b)))
+        .unwrap_or((path, None))
+}
+
 pub fn map_entry<T: Branch + StableAbi>(
     branch: &T,
     entry: Mapping<T>,
@@ -34,10 +40,7 @@ pub fn get_entry<T: Branch + StableAbi>(
     path: &str,
     plugins: &CPluginStore,
 ) -> Result<DirEntry> {
-    let (local, remote) = path
-        .split_once("/")
-        .map(|(a, b)| (a, Some(b)))
-        .unwrap_or((path, None));
+    let (local, remote) = split_path(path);
 
     let entry = plugins
         .lookup_entry::<T>(local)
