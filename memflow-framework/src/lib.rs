@@ -5,6 +5,7 @@ use filer::branch;
 use filer::prelude::v1::{Error, ErrorKind, ErrorOrigin, Result, *};
 pub use memflow::mem::MemData;
 use memflow::prelude::v1::*;
+use std::sync::Arc;
 
 pub fn create_node() -> CArcSome<Node> {
     let backend = NodeBackend::default();
@@ -56,8 +57,6 @@ impl Leaf for ThreadedConnectorArc {
         ))
     }
 }
-
-use std::sync::{Arc, Weak};
 
 pub struct MemflowBackend {
     connector: Arc<LocalBackend<ThreadedConnectorArc, Arc<Self>>>,
@@ -113,20 +112,33 @@ pub struct ThreadedConnectorArc(CArcSome<ThreadedConnector>);
 
 impl StrBuild<CArc<Arc<MemflowBackend>>> for ThreadedConnectorArc {
     fn build(input: &str, ctx: &CArc<Arc<MemflowBackend>>) -> Result<ThreadedConnectorArc> {
-        let (name, args) = input.split_once(":").unwrap_or((input, ""));
-        ctx.as_ref()
-            .ok_or(ErrorKind::NotFound)?
-            .inventory
+        let (chain_with, name, args) = split_args(input);
+
+        println!("{:?} | {} | {}", chain_with, name, args);
+
+        let ctx = ctx.as_ref().ok_or(ErrorKind::NotFound)?;
+
+        let chain_with = if let Some(cw) = chain_with {
+            Some(
+                ctx.os
+                    .get(cw)
+                    .ok_or(ErrorKind::NotFound)?
+                    .0
+                     .0
+                    .get_orig()
+                    .clone(),
+            )
+        } else {
+            None
+        };
+
+        ctx.inventory
             .create_connector(
                 name,
-                None,
+                chain_with,
                 Some(&str::parse(args).map_err(|_| ErrorKind::InvalidArgument)?),
             )
             .map(|c| ThreadedConnector::from(c).self_arc_up())
-            .map_err(|e| {
-                println!("{}", input);
-                e
-            })
             .map_err(|_| ErrorKind::Uninitialized.into())
     }
 }
@@ -234,15 +246,56 @@ impl From<OsInstanceArcBox<'static>> for ThreadedOs {
 #[repr(transparent)]
 pub struct ThreadedOsArc(CArcSome<ThreadedOs>);
 
+/// Splits the connector/os arguments into parts.
+///
+/// The parts provided are:
+///
+/// 1. Parent OS/Connector to chain with.
+/// 2. Name of the plugin library.
+/// 3. Arguments for the plugin.
+///
+fn split_args(input: &str) -> (Option<&str>, &str, &str) {
+    let input = input.trim();
+
+    let (chain_with, input) = if input.starts_with("-c ") {
+        let input = input.strip_prefix("-c").unwrap().trim();
+
+        input
+            .split_once(" ")
+            .map(|(a, b)| (Some(a), b))
+            .unwrap_or((Some(input), ""))
+    } else {
+        (None, input)
+    };
+
+    let (name, args) = input.split_once(":").unwrap_or((input, ""));
+    (chain_with, name, args)
+}
+
 impl StrBuild<CArc<Arc<MemflowBackend>>> for ThreadedOsArc {
     fn build(input: &str, ctx: &CArc<Arc<MemflowBackend>>) -> Result<ThreadedOsArc> {
-        let (name, args) = input.split_once(":").unwrap_or((input, ""));
-        ctx.as_ref()
-            .ok_or(ErrorKind::NotFound)?
-            .inventory
+        let (chain_with, name, args) = split_args(input);
+
+        let ctx = ctx.as_ref().ok_or(ErrorKind::NotFound)?;
+
+        let chain_with = if let Some(cw) = chain_with {
+            Some(
+                ctx.connector
+                    .get(cw)
+                    .ok_or(ErrorKind::NotFound)?
+                    .0
+                     .0
+                    .get_orig()
+                    .clone(),
+            )
+        } else {
+            None
+        };
+
+        ctx.inventory
             .create_os(
                 name,
-                None,
+                chain_with,
                 Some(&str::parse(args).map_err(|_| ErrorKind::InvalidArgument)?),
             )
             .map(|c| ThreadedOs::from(c).self_arc_up())
