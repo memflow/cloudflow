@@ -25,33 +25,43 @@ impl ListEntry {
     }
 }
 
-#[derive(Default)]
+#[repr(C)]
+#[derive(StableAbi)]
 pub struct Node {
-    pub backend: NodeBackend,
-    pub frontends: Vec<FrontendArcBox<'static>>,
+    pub backend: BackendBox<'static>,
     pub plugins: CPluginStore,
 }
 
-impl Frontend for Node {
+impl Node {
+    pub fn new<T: Backend + Into<BackendBaseBox<'static, T>> + 'static>(backend: T) -> Self {
+        let backend = trait_obj!(backend as Backend);
+        Self {
+            backend,
+            plugins: Default::default(),
+        }
+    }
+}
+
+impl Frontend for CArcSome<Node> {
     /// Perform read operation on the given handle
     fn read(&self, handle: usize, data: CIterator<RWData>) -> Result<()> {
-        self.backend.read(handle, data)
+        self.backend.read(self.into(), handle, data)
     }
     /// Perform write operation on the given handle.
     fn write(&self, handle: usize, data: CIterator<ROData>) -> Result<()> {
-        self.backend.write(handle, data)
+        self.backend.write(self.into(), handle, data)
     }
     /// Perform remote procedure call on the given handle.
     fn rpc(&self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()> {
-        self.backend.rpc(handle, input, output)
+        self.backend.rpc(self.into(), handle, input, output)
     }
     /// Open a leaf at the given path. The result is a handle.
     fn open(&self, path: &str) -> Result<usize> {
-        self.backend.open(path, &self.plugins)
+        self.backend.open(self.into(), path, &self.plugins)
     }
     /// List entries in the given path. It is a (name, is_branch) pair.
     fn list(&self, path: &str, out: &mut OpaqueCallback<ListEntry>) -> Result<()> {
-        self.backend.list(path, &self.plugins, out)
+        self.backend.list(self.into(), path, &self.plugins, out)
     }
 }
 
@@ -76,12 +86,80 @@ impl NodeBackend {
     }
 }
 
+impl<T: Backend> Backend for std::sync::Arc<T> {
+    fn read(&self, stack: BackendStack, handle: usize, data: CIterator<RWData>) -> Result<()> {
+        (**self).read(stack, handle, data)
+    }
+
+    fn write(&self, stack: BackendStack, handle: usize, data: CIterator<ROData>) -> Result<()> {
+        (**self).write(stack, handle, data)
+    }
+
+    fn rpc(
+        &self,
+        stack: BackendStack,
+        handle: usize,
+        input: &[u8],
+        output: &mut [u8],
+    ) -> Result<()> {
+        (**self).rpc(stack, handle, input, output)
+    }
+
+    fn open(&self, stack: BackendStack, path: &str, plugins: &CPluginStore) -> Result<usize> {
+        (**self).open(stack, path, plugins)
+    }
+
+    fn list(
+        &self,
+        stack: BackendStack,
+        path: &str,
+        plugins: &CPluginStore,
+        out: &mut OpaqueCallback<ListEntry>,
+    ) -> Result<()> {
+        (**self).list(stack, path, plugins, out)
+    }
+}
+
+impl<T: Backend> Backend for CArcSome<T> {
+    fn read(&self, stack: BackendStack, handle: usize, data: CIterator<RWData>) -> Result<()> {
+        (**self).read(stack, handle, data)
+    }
+
+    fn write(&self, stack: BackendStack, handle: usize, data: CIterator<ROData>) -> Result<()> {
+        (**self).write(stack, handle, data)
+    }
+
+    fn rpc(
+        &self,
+        stack: BackendStack,
+        handle: usize,
+        input: &[u8],
+        output: &mut [u8],
+    ) -> Result<()> {
+        (**self).rpc(stack, handle, input, output)
+    }
+
+    fn open(&self, stack: BackendStack, path: &str, plugins: &CPluginStore) -> Result<usize> {
+        (**self).open(stack, path, plugins)
+    }
+
+    fn list(
+        &self,
+        stack: BackendStack,
+        path: &str,
+        plugins: &CPluginStore,
+        out: &mut OpaqueCallback<ListEntry>,
+    ) -> Result<()> {
+        (**self).list(stack, path, plugins, out)
+    }
+}
+
 impl Backend for NodeBackend {
-    fn read(&self, handle: usize, data: CIterator<RWData>) -> Result<()> {
+    fn read(&self, stack: BackendStack, handle: usize, data: CIterator<RWData>) -> Result<()> {
         match self.handles.get(handle).as_ref().map(|v| &**v) {
             Some(&HandleMap::Forward(backend, handle)) => {
                 if let Some(backend) = self.backends.get(backend) {
-                    backend.read(handle, data)
+                    backend.read((&stack, self).into(), handle, data)
                 } else {
                     Err(Error(ErrorOrigin::Node, ErrorKind::InvalidPath))
                 }
@@ -91,11 +169,11 @@ impl Backend for NodeBackend {
         }
     }
 
-    fn write(&self, handle: usize, data: CIterator<ROData>) -> Result<()> {
+    fn write(&self, stack: BackendStack, handle: usize, data: CIterator<ROData>) -> Result<()> {
         match self.handles.get(handle).as_ref().map(|v| &**v) {
             Some(&HandleMap::Forward(backend, handle)) => {
                 if let Some(backend) = self.backends.get(backend) {
-                    backend.write(handle, data)
+                    backend.write((&stack, self).into(), handle, data)
                 } else {
                     Err(Error(ErrorOrigin::Node, ErrorKind::InvalidPath))
                 }
@@ -105,11 +183,17 @@ impl Backend for NodeBackend {
         }
     }
 
-    fn rpc(&self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()> {
+    fn rpc(
+        &self,
+        stack: BackendStack,
+        handle: usize,
+        input: &[u8],
+        output: &mut [u8],
+    ) -> Result<()> {
         match self.handles.get(handle).as_ref().map(|v| &**v) {
             Some(&HandleMap::Forward(backend, handle)) => {
                 if let Some(backend) = self.backends.get(backend) {
-                    backend.rpc(handle, input, output)
+                    backend.rpc((&stack, self).into(), handle, input, output)
                 } else {
                     Err(Error(ErrorOrigin::Node, ErrorKind::InvalidPath))
                 }
@@ -119,14 +203,14 @@ impl Backend for NodeBackend {
         }
     }
 
-    fn open(&self, path: &str, plugins: &CPluginStore) -> Result<usize> {
+    fn open(&self, stack: BackendStack, path: &str, plugins: &CPluginStore) -> Result<usize> {
         if let Some((backend, path)) = path.split_once("/") {
             if let Some((bid, backend)) = self
                 .backend_map
                 .get(backend)
                 .and_then(|idx| self.backends.get(*idx).map(|b| (*idx, b)))
             {
-                let ret = backend.open(path, plugins)?;
+                let ret = backend.open((&stack, self).into(), path, plugins)?;
                 let ret = self.handles.insert(HandleMap::Forward(bid, ret)).unwrap();
                 return Ok(ret);
             }
@@ -137,6 +221,7 @@ impl Backend for NodeBackend {
 
     fn list(
         &self,
+        stack: BackendStack,
         path: &str,
         plugins: &CPluginStore,
         out: &mut OpaqueCallback<ListEntry>,
@@ -150,7 +235,7 @@ impl Backend for NodeBackend {
                 .get(backend)
                 .and_then(|idx| self.backends.get(*idx))
             {
-                return backend.list(path, plugins, out);
+                return backend.list((&stack, self).into(), path, plugins, out);
             }
         } else {
             self.backend_map

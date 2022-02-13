@@ -6,22 +6,10 @@ use filer::prelude::v1::{Error, ErrorKind, ErrorOrigin, Result, *};
 pub use memflow::mem::MemData;
 use memflow::prelude::v1::*;
 
-pub fn create_node() -> Node {
-    let node = Node::default();
+pub fn create_node() -> CArcSome<Node> {
+    let backend = NodeBackend::default();
 
-    let inventory: CArcSome<_> = Inventory::scan().into();
-
-    let connector = LocalBackend::<ThreadedConnectorArc>::default()
-        .with_context_arc(inventory.clone().transpose())
-        .with_new();
-
-    node.backend.add_backend("connector", connector);
-
-    let os = LocalBackend::<ThreadedOsArc>::default()
-        .with_context_arc(inventory.clone().transpose())
-        .with_new();
-
-    node.backend.add_backend("os", os);
+    MemflowBackend::to_node(&backend);
 
     extern "C" fn self_as_leaf<T: Leaf + Into<LeafBaseBox<'static, T>> + Clone + 'static>(
         obj: &T,
@@ -29,13 +17,15 @@ pub fn create_node() -> Node {
         COption::Some(trait_obj!(obj.clone() as Leaf))
     }
 
+    let node = Node::new(backend);
+
     node.plugins
         .register_mapping("os", Mapping::Leaf(self_as_leaf::<ThreadedOsArc>));
 
     node.plugins
         .register_mapping("mem", Mapping::Leaf(self_as_leaf::<ThreadedConnectorArc>));
 
-    node
+    node.into()
 }
 
 impl Branch for ThreadedConnectorArc {
@@ -67,6 +57,52 @@ impl Leaf for ThreadedConnectorArc {
     }
 }
 
+use std::sync::{Arc, Weak};
+
+pub struct MemflowBackend {
+    connector: Arc<LocalBackend<ThreadedConnectorArc, Arc<Self>>>,
+    os: Arc<LocalBackend<ThreadedOsArc, Arc<Self>>>,
+    inventory: Inventory,
+}
+
+impl Default for MemflowBackend {
+    fn default() -> Self {
+        Self {
+            connector: LocalBackend::default().with_new().into(),
+            os: LocalBackend::default().with_new().into(),
+            inventory: Inventory::scan(),
+        }
+    }
+}
+
+impl MemflowBackend {
+    fn new_arc() -> CArcSome<Self> {
+        let ret = Arc::from(Self::default());
+
+        // SAFETY: we are not reading the underlying object from anywhere else.
+        unsafe {
+            unsafe fn ptr_mut<T>(ptr: *const T) -> *mut T {
+                ptr as *mut T
+            }
+
+            (*ptr_mut(&*ret.connector)).set_context(ret.clone());
+            (*ptr_mut(&*ret.os)).set_context(ret.clone());
+        }
+
+        ret.into()
+    }
+
+    fn add_to_node(&self, backend: &NodeBackend) {
+        backend.add_backend("connector", self.connector.clone());
+        backend.add_backend("os", self.os.clone());
+        println!("ADDED!!");
+    }
+
+    pub fn to_node(backend: &NodeBackend) {
+        Self::new_arc().add_to_node(backend)
+    }
+}
+
 #[derive(StableAbi)]
 #[repr(transparent)]
 pub struct ThreadedConnector(ThreadCtx<ConnectorInstanceArcBox<'static>>);
@@ -75,17 +111,22 @@ pub struct ThreadedConnector(ThreadCtx<ConnectorInstanceArcBox<'static>>);
 #[repr(transparent)]
 pub struct ThreadedConnectorArc(CArcSome<ThreadedConnector>);
 
-impl StrBuild<CArc<Inventory>> for ThreadedConnectorArc {
-    fn build(input: &str, ctx: &CArc<Inventory>) -> Result<ThreadedConnectorArc> {
+impl StrBuild<CArc<Arc<MemflowBackend>>> for ThreadedConnectorArc {
+    fn build(input: &str, ctx: &CArc<Arc<MemflowBackend>>) -> Result<ThreadedConnectorArc> {
         let (name, args) = input.split_once(":").unwrap_or((input, ""));
         ctx.as_ref()
             .ok_or(ErrorKind::NotFound)?
+            .inventory
             .create_connector(
                 name,
                 None,
                 Some(&str::parse(args).map_err(|_| ErrorKind::InvalidArgument)?),
             )
             .map(|c| ThreadedConnector::from(c).self_arc_up())
+            .map_err(|e| {
+                println!("{}", input);
+                e
+            })
             .map_err(|_| ErrorKind::Uninitialized.into())
     }
 }
@@ -193,11 +234,12 @@ impl From<OsInstanceArcBox<'static>> for ThreadedOs {
 #[repr(transparent)]
 pub struct ThreadedOsArc(CArcSome<ThreadedOs>);
 
-impl StrBuild<CArc<Inventory>> for ThreadedOsArc {
-    fn build(input: &str, ctx: &CArc<Inventory>) -> Result<ThreadedOsArc> {
+impl StrBuild<CArc<Arc<MemflowBackend>>> for ThreadedOsArc {
+    fn build(input: &str, ctx: &CArc<Arc<MemflowBackend>>) -> Result<ThreadedOsArc> {
         let (name, args) = input.split_once(":").unwrap_or((input, ""));
         ctx.as_ref()
             .ok_or(ErrorKind::NotFound)?
+            .inventory
             .create_os(
                 name,
                 None,

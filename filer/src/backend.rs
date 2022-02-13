@@ -1,5 +1,6 @@
 use crate::error::*;
 use crate::fs::*;
+use crate::node::*;
 use crate::plugin_store::*;
 use crate::str_build::*;
 use crate::types::*;
@@ -9,7 +10,7 @@ use cglue::prelude::v1::*;
 pub use cglue::slice::CSliceMut;
 use cglue::trait_group::c_void;
 
-use dashmap::DashMap;
+use dashmap::{mapref::one::Ref, DashMap};
 use sharded_slab::Slab;
 
 #[derive(StableAbi)]
@@ -81,8 +82,9 @@ pub struct LocalBackend<T: 'static, C: 'static = ()> {
     entries: CArcSome<DashMap<String, T>>,
     context: CArc<C>,
     handle_objs: Slab<FileOpsObj<c_void>>,
+    build_fn: Option<fn(&str, &CArc<C>) -> Result<T>>,
     new_handle: Result<usize>,
-    rm_handle: usize,
+    rm_handle: Result<usize>,
 }
 
 impl<T, C> Default for LocalBackend<T, C> {
@@ -91,29 +93,24 @@ impl<T, C> Default for LocalBackend<T, C> {
         let entries: CArcSome<DashMap<String, T>> = entries.into();
 
         let handle_objs = Slab::new();
-        let rm_obj = RmHandler(entries.clone());
-        let rm_obj = FileOpsObj::new(rm_obj.into(), None, Some(RmHandler::write), None);
-        let rm_handle = handle_objs.insert(rm_obj).unwrap();
 
-        Self {
+        let mut ret = Self {
             entries,
             handle_objs,
             context: CArc::default(),
             new_handle: Err(Error(ErrorOrigin::Backend, ErrorKind::NotSupported)),
-            rm_handle,
-        }
+            rm_handle: Err(ErrorKind::Unknown.into()),
+            build_fn: None,
+        };
+        ret.rebuild_rm();
+        ret
     }
 }
 
 impl<T: StrBuild<CArc<C>>, C> LocalBackend<T, C> {
     pub fn with_new(mut self) -> Self {
-        let new_obj = NewHandler(self.entries.clone(), self.context.clone(), T::build);
-        let new_obj = FileOpsObj::new(new_obj.into(), None, Some(NewHandler::write), None);
-        let new_handle = self
-            .handle_objs
-            .insert(new_obj)
-            .ok_or(Error(ErrorOrigin::Backend, ErrorKind::Unknown));
-        self.new_handle = new_handle;
+        self.build_fn = Some(T::build);
+        self.rebuild_new();
         self
     }
 }
@@ -121,6 +118,45 @@ impl<T: StrBuild<CArc<C>>, C> LocalBackend<T, C> {
 //}
 
 impl<T, C> LocalBackend<T, C> {
+    pub fn get(&self, name: &str) -> Option<Ref<String, T>> {
+        self.entries.get(name)
+    }
+
+    pub fn set_context(&mut self, context: C) {
+        self.context = context.into();
+        self.rebuild_rm();
+        self.rebuild_new();
+    }
+
+    pub fn rebuild_rm(&mut self) {
+        if let Ok(rm_handle) = self.rm_handle {
+            self.handle_objs.remove(rm_handle);
+        }
+        let rm_obj = RmHandler(self.entries.clone());
+        let rm_obj = FileOpsObj::new(rm_obj.into(), None, Some(RmHandler::write), None);
+        let rm_handle = self
+            .handle_objs
+            .insert(rm_obj)
+            .ok_or(Error(ErrorOrigin::Backend, ErrorKind::Unknown));
+        self.rm_handle = rm_handle;
+    }
+
+    pub fn rebuild_new(&mut self) {
+        if let Ok(new_handle) = self.new_handle {
+            self.handle_objs.remove(new_handle);
+        }
+
+        if let Some(build_fn) = self.build_fn {
+            let new_obj = NewHandler(self.entries.clone(), self.context.clone(), build_fn);
+            let new_obj = FileOpsObj::new(new_obj.into(), None, Some(NewHandler::write), None);
+            let new_handle = self
+                .handle_objs
+                .insert(new_obj)
+                .ok_or(Error(ErrorOrigin::Backend, ErrorKind::Unknown));
+            self.new_handle = new_handle;
+        }
+    }
+
     pub fn with_context_arc<NC>(self, context: CArc<NC>) -> LocalBackend<T, NC> {
         let Self {
             entries,
@@ -136,6 +172,7 @@ impl<T, C> LocalBackend<T, C> {
             context,
             new_handle,
             rm_handle,
+            build_fn: None,
         }
     }
 
@@ -157,34 +194,40 @@ impl<T, C> LocalBackend<T, C> {
 }
 
 impl<T: Branch, C> Backend for LocalBackend<T, C> {
-    fn read(&self, handle: usize, data: CIterator<RWData>) -> Result<()> {
+    fn read(&self, stack: BackendStack, handle: usize, data: CIterator<RWData>) -> Result<()> {
         match self.handle_objs.get(handle) {
             Some(f) => f.read(data),
             _ => Err(Error(ErrorOrigin::Backend, ErrorKind::NotFound)),
         }
     }
 
-    fn write(&self, handle: usize, data: CIterator<ROData>) -> Result<()> {
+    fn write(&self, stack: BackendStack, handle: usize, data: CIterator<ROData>) -> Result<()> {
         match self.handle_objs.get(handle) {
             Some(f) => f.write(data),
             _ => Err(Error(ErrorOrigin::Backend, ErrorKind::NotFound)),
         }
     }
 
-    fn rpc(&self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()> {
+    fn rpc(
+        &self,
+        stack: BackendStack,
+        handle: usize,
+        input: &[u8],
+        output: &mut [u8],
+    ) -> Result<()> {
         match self.handle_objs.get(handle) {
             Some(f) => f.rpc(input, output),
             _ => Err(Error(ErrorOrigin::Backend, ErrorKind::NotFound)),
         }
     }
 
-    fn open(&self, path: &str, plugins: &CPluginStore) -> Result<usize> {
+    fn open(&self, stack: BackendStack, path: &str, plugins: &CPluginStore) -> Result<usize> {
         let (branch, path) = path.split_once("/").unwrap_or((path, ""));
 
         if path.is_empty() && branch == "new" {
             self.new_handle
         } else if path.is_empty() && branch == "rm" {
-            Ok(self.rm_handle)
+            self.rm_handle
         } else {
             match self
                 .entries
@@ -201,6 +244,7 @@ impl<T: Branch, C> Backend for LocalBackend<T, C> {
 
     fn list(
         &self,
+        stack: BackendStack,
         path: &str,
         plugins: &CPluginStore,
         out: &mut OpaqueCallback<ListEntry>,
@@ -238,20 +282,52 @@ impl<T: Branch, C> Backend for LocalBackend<T, C> {
     }
 }
 
+#[repr(C)]
+#[derive(StableAbi)]
+pub enum BackendStack<'a> {
+    Node(&'a CArcSome<Node>),
+    Backend(&'a BackendStack<'a>, BackendRef<'a>),
+}
+
+impl<'a> From<&'a CArcSome<Node>> for BackendStack<'a> {
+    fn from(node: &'a CArcSome<Node>) -> Self {
+        BackendStack::Node(node)
+    }
+}
+
+impl<'a, 'b: 'a, T: Backend> From<(&'a BackendStack<'b>, &'a T)> for BackendStack<'a>
+where
+    &'a T: Into<BackendBaseRef<'a, T>>,
+{
+    fn from((stack, backend): (&'a BackendStack<'b>, &'a T)) -> Self {
+        // SAFETY: We are shortening the lifetime 'b to 'a. This lifetime is only used to bind
+        // references, thus it is okay.
+        let stack = unsafe { core::mem::transmute(stack) };
+        BackendStack::Backend(stack, trait_obj!(backend as Backend))
+    }
+}
+
 #[cglue_trait]
 #[int_result]
 pub trait Backend {
     /// Perform read operation on the given handle
-    fn read(&self, handle: usize, data: CIterator<RWData>) -> Result<()>;
+    fn read(&self, stack: BackendStack, handle: usize, data: CIterator<RWData>) -> Result<()>;
     /// Perform write operation on the given handle.
-    fn write(&self, handle: usize, data: CIterator<ROData>) -> Result<()>;
+    fn write(&self, stack: BackendStack, handle: usize, data: CIterator<ROData>) -> Result<()>;
     /// Perform remote procedure call on the given handle.
-    fn rpc(&self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()>;
+    fn rpc(
+        &self,
+        stack: BackendStack,
+        handle: usize,
+        input: &[u8],
+        output: &mut [u8],
+    ) -> Result<()>;
     /// Open a leaf at the given path. The result is a handle.
-    fn open(&self, path: &str, plugins: &CPluginStore) -> Result<usize>;
+    fn open(&self, stack: BackendStack, path: &str, plugins: &CPluginStore) -> Result<usize>;
     /// List entries in the given path. It is a (name, is_branch) pair.
     fn list(
         &self,
+        stack: BackendStack,
         path: &str,
         plugins: &CPluginStore,
         out: &mut OpaqueCallback<ListEntry>,

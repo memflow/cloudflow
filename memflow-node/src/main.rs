@@ -36,7 +36,7 @@ impl TreeItem for TreeNode {
     }
 }
 
-fn build_tree(node: &Node, path: &mut Vec<String>, tree: &mut TreeNode) -> Result<()> {
+fn build_tree(node: &impl Frontend, path: &mut Vec<String>, tree: &mut TreeNode) -> Result<()> {
     if let TreeNode::Branch(_, children) = tree {
         node.list(
             &path.join("/"),
@@ -243,7 +243,7 @@ fn main() -> Result<()> {
 
     let mut buf = vec![0; 4096];
 
-    let cr3 = 0x3dce10000u64;
+    let cr3 = 0x7eae10000u64;
 
     let mut iter = std::iter::once(CTup2(cr3, CSliceMut::from(buf.as_mut_slice())));
 
