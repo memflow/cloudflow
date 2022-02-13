@@ -23,26 +23,26 @@ pub type RWData<'a> = CTup2<Size, CSliceMut<'a, u8>>;
 pub type ROData<'a> = CTup2<Size, CSliceRef<'a, u8>>;
 
 pub trait ArcType: Sized + 'static {
-    type ArcSelf: Into<CArc<Self>>;
+    type ArcSelf: Into<CArcSome<Self>>;
 
-    fn arc_up(self) -> CArc<Self> {
+    fn arc_up(self) -> CArcSome<Self> {
         self.into()
     }
 
     fn self_arc_up(self) -> Self::ArcSelf
     where
-        CArc<Self>: Into<Self::ArcSelf>,
+        CArcSome<Self>: Into<Self::ArcSelf>,
     {
-        CArc::from(self).into()
+        CArcSome::from(self).into()
     }
 
-    fn into_arc(arc: Self::ArcSelf) -> CArc<Self> {
+    fn into_arc(arc: Self::ArcSelf) -> CArcSome<Self> {
         arc.into()
     }
 
-    fn from_arc(arc: CArc<Self>) -> Self::ArcSelf
+    fn from_arc(arc: CArcSome<Self>) -> Self::ArcSelf
     where
-        CArc<Self>: Into<Self::ArcSelf>,
+        CArcSome<Self>: Into<Self::ArcSelf>,
     {
         arc.into()
     }

@@ -127,7 +127,7 @@ impl Backend for NodeBackend {
                 .and_then(|idx| self.backends.get(*idx).map(|b| (*idx, b)))
             {
                 let ret = backend.open(path, plugins)?;
-                self.handles.insert(HandleMap::Forward(bid, ret));
+                let ret = self.handles.insert(HandleMap::Forward(bid, ret)).unwrap();
                 return Ok(ret);
             }
         }
@@ -178,4 +178,106 @@ pub trait Frontend {
     fn open(&self, path: &str) -> Result<usize>;
     /// List entries in the given path. It is a (name, is_branch) pair.
     fn list(&self, path: &str, out: &mut OpaqueCallback<ListEntry>) -> Result<()>;
+
+    #[skip_func]
+    fn open_handle<'a>(&'a self, path: &str) -> Result<ObjHandle<'a, Self>>
+    where
+        Self: Sized,
+    {
+        Ok((self, self.open(path)?).into())
+    }
+
+    #[skip_func]
+    fn open_cursor<'a>(&'a self, path: &str) -> Result<ObjCursor<'a, Self>>
+    where
+        Self: Sized,
+    {
+        Ok((self, self.open(path)?).into())
+    }
+}
+
+pub struct ObjHandle<'a, T>(&'a T, usize);
+
+impl<'a, T> From<(&'a T, usize)> for ObjHandle<'a, T> {
+    fn from((a, b): (&'a T, usize)) -> Self {
+        Self(a, b)
+    }
+}
+
+impl<'a, T: Frontend> ObjHandle<'a, T> {
+    /// Perform read operation on the given handle
+    pub fn read(&self, data: CIterator<RWData>) -> Result<()> {
+        self.0.read(self.1, data)
+    }
+    /// Perform write operation on the given handle.
+    pub fn write(&self, data: CIterator<ROData>) -> Result<()> {
+        self.0.write(self.1, data)
+    }
+    /// Perform remote procedure call on the given handle.
+    pub fn rpc(&self, input: &[u8], output: &mut [u8]) -> Result<()> {
+        self.0.rpc(self.1, input, output)
+    }
+}
+
+pub struct ObjCursor<'a, T>(ObjHandle<'a, T>, Size);
+
+impl<'a, T> From<(&'a T, usize)> for ObjCursor<'a, T> {
+    fn from((a, b): (&'a T, usize)) -> Self {
+        Self(ObjHandle(a, b), 0)
+    }
+}
+
+impl<'a, T> From<(&'a T, usize, Size)> for ObjCursor<'a, T> {
+    fn from((a, b, c): (&'a T, usize, Size)) -> Self {
+        Self(ObjHandle(a, b), c)
+    }
+}
+
+impl<'a, T: Frontend> std::io::Read for ObjCursor<'a, T> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.0
+            .read((&mut core::iter::once(CTup2(self.1, buf.into()))).into())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.as_str()))?;
+        self.1 += buf.len() as Size;
+        Ok(buf.len())
+    }
+}
+
+impl<'a, T: Frontend> std::io::Write for ObjCursor<'a, T> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .write((&mut core::iter::once(CTup2(self.1, buf.into()))).into())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.as_str()))?;
+        self.1 += buf.len() as Size;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+use std::io::SeekFrom;
+
+impl<'a, T: Frontend> std::io::Seek for ObjCursor<'a, T> {
+    fn seek(&mut self, s: SeekFrom) -> std::io::Result<u64> {
+        match s {
+            SeekFrom::Start(v) => {
+                self.1 = v as u64;
+                Ok(v)
+            }
+            SeekFrom::Current(v) => {
+                if v >= 0 {
+                    self.1 += v as Size;
+                } else {
+                    self.1 -= (-v) as Size;
+                }
+                Ok(self.1 as u64)
+            }
+            SeekFrom::End(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "not supprted",
+            )),
+        }
+    }
 }

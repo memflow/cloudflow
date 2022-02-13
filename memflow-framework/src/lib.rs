@@ -9,19 +9,17 @@ use memflow::prelude::v1::*;
 pub fn create_node() -> Node {
     let node = Node::default();
 
-    let connector = LocalBackend::<ThreadedConnectorArc>::default();
+    let inventory: CArcSome<_> = Inventory::scan().into();
 
-    let inventory = Inventory::scan();
-
-    let kcore = inventory.create_connector("kcore", None, None).unwrap();
-    connector.insert("kcore", ThreadedConnector::from(kcore).self_arc_up());
+    let connector = LocalBackend::<ThreadedConnectorArc>::default()
+        .with_context_arc(inventory.clone().transpose())
+        .with_new();
 
     node.backend.add_backend("connector", connector);
 
-    let os = LocalBackend::<ThreadedOsArc>::default();
-
-    let native = inventory.create_os("native", None, None).unwrap();
-    os.insert("native", ThreadedOs::from(native).self_arc_up());
+    let os = LocalBackend::<ThreadedOsArc>::default()
+        .with_context_arc(inventory.clone().transpose())
+        .with_new();
 
     node.backend.add_backend("os", os);
 
@@ -75,16 +73,31 @@ pub struct ThreadedConnector(ThreadCtx<ConnectorInstanceArcBox<'static>>);
 
 #[derive(Clone, StableAbi)]
 #[repr(transparent)]
-pub struct ThreadedConnectorArc(CArc<ThreadedConnector>);
+pub struct ThreadedConnectorArc(CArcSome<ThreadedConnector>);
 
-impl From<ThreadedConnectorArc> for CArc<ThreadedConnector> {
+impl StrBuild<CArc<Inventory>> for ThreadedConnectorArc {
+    fn build(input: &str, ctx: &CArc<Inventory>) -> Result<ThreadedConnectorArc> {
+        let (name, args) = input.split_once(":").unwrap_or((input, ""));
+        ctx.as_ref()
+            .ok_or(ErrorKind::NotFound)?
+            .create_connector(
+                name,
+                None,
+                Some(&str::parse(args).map_err(|_| ErrorKind::InvalidArgument)?),
+            )
+            .map(|c| ThreadedConnector::from(c).self_arc_up())
+            .map_err(|_| ErrorKind::Uninitialized.into())
+    }
+}
+
+impl From<ThreadedConnectorArc> for CArcSome<ThreadedConnector> {
     fn from(ThreadedConnectorArc(arc): ThreadedConnectorArc) -> Self {
         arc
     }
 }
 
-impl From<CArc<ThreadedConnector>> for ThreadedConnectorArc {
-    fn from(arc: CArc<ThreadedConnector>) -> Self {
+impl From<CArcSome<ThreadedConnector>> for ThreadedConnectorArc {
+    fn from(arc: CArcSome<ThreadedConnector>) -> Self {
         ThreadedConnectorArc(arc)
     }
 }
@@ -178,7 +191,22 @@ impl From<OsInstanceArcBox<'static>> for ThreadedOs {
 
 #[derive(Clone, StableAbi)]
 #[repr(transparent)]
-pub struct ThreadedOsArc(CArc<ThreadedOs>);
+pub struct ThreadedOsArc(CArcSome<ThreadedOs>);
+
+impl StrBuild<CArc<Inventory>> for ThreadedOsArc {
+    fn build(input: &str, ctx: &CArc<Inventory>) -> Result<ThreadedOsArc> {
+        let (name, args) = input.split_once(":").unwrap_or((input, ""));
+        ctx.as_ref()
+            .ok_or(ErrorKind::NotFound)?
+            .create_os(
+                name,
+                None,
+                Some(&str::parse(args).map_err(|_| ErrorKind::InvalidArgument)?),
+            )
+            .map(|c| ThreadedOs::from(c).self_arc_up())
+            .map_err(|_| ErrorKind::Uninitialized.into())
+    }
+}
 
 impl ArcType for ThreadedOs {
     type ArcSelf = ThreadedOsArc;
@@ -188,14 +216,14 @@ impl ArcType for ThreadedConnector {
     type ArcSelf = ThreadedConnectorArc;
 }
 
-impl From<ThreadedOsArc> for CArc<ThreadedOs> {
+impl From<ThreadedOsArc> for CArcSome<ThreadedOs> {
     fn from(ThreadedOsArc(arc): ThreadedOsArc) -> Self {
         arc
     }
 }
 
-impl From<CArc<ThreadedOs>> for ThreadedOsArc {
-    fn from(arc: CArc<ThreadedOs>) -> Self {
+impl From<CArcSome<ThreadedOs>> for ThreadedOsArc {
+    fn from(arc: CArcSome<ThreadedOs>) -> Self {
         ThreadedOsArc(arc)
     }
 }

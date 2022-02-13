@@ -63,7 +63,7 @@ pub trait Leaf {
 #[repr(C)]
 #[derive(Clone, StableAbi)]
 pub struct FileOpsObj<T: 'static> {
-    obj: CArc<T>,
+    obj: CArcSome<T>,
     read: Option<for<'a> extern "C" fn(&'a T, data: CIterator<RWData>) -> i32>,
     write: Option<for<'a> extern "C" fn(&'a T, data: CIterator<ROData>) -> i32>,
     rpc: Option<
@@ -73,7 +73,7 @@ pub struct FileOpsObj<T: 'static> {
 
 impl<T> FileOpsObj<T> {
     pub fn new(
-        obj: CArc<T>,
+        obj: CArcSome<T>,
         read: Option<for<'a> extern "C" fn(&'a T, data: CIterator<RWData>) -> i32>,
         write: Option<for<'a> extern "C" fn(&'a T, data: CIterator<ROData>) -> i32>,
         rpc: Option<
@@ -97,8 +97,7 @@ impl<T> FileOpsObj<T> {
         from_int_result_empty((self
             .read
             .ok_or(Error(ErrorOrigin::Read, ErrorKind::NotImplemented))?)(
-            self.obj.as_ref().unwrap(),
-            data,
+            &self.obj, data
         ))
     }
 
@@ -106,8 +105,7 @@ impl<T> FileOpsObj<T> {
         from_int_result_empty((self
             .write
             .ok_or(Error(ErrorOrigin::Write, ErrorKind::NotImplemented))?)(
-            self.obj.as_ref().unwrap(),
-            data,
+            &self.obj, data,
         ))
     }
 
@@ -115,7 +113,7 @@ impl<T> FileOpsObj<T> {
         from_int_result_empty((self
             .rpc
             .ok_or(Error(ErrorOrigin::Rpc, ErrorKind::NotImplemented))?)(
-            self.obj.as_ref().unwrap(),
+            &self.obj,
             input.into(),
             output.into(),
         ))

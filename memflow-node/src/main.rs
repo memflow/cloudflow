@@ -220,6 +220,15 @@ fn main() -> Result<()> {
 
     let node = create_node();
 
+    println!("Create connectors");
+
+    let mut conn_new = node.open_cursor("connector/new")?;
+    write!(conn_new, "kcore kcore")?;
+    write!(conn_new, "qemu_win10 qemu:win10-hw")?;
+
+    let mut os_new = node.open_cursor("os/new")?;
+    write!(os_new, "native native")?;
+
     println!("List tree");
 
     let mut root = TreeNode::Branch("/".into(), vec![]);

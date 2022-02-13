@@ -88,6 +88,10 @@ impl<T> ThreadCtx<T> {
             None
         }
     }
+
+    pub fn get_orig(&self) -> &T {
+        &self.orig
+    }
 }
 
 impl<T: Clone> ThreadCtx<T> {
