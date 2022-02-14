@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 pub extern "C" fn on_node(node: &Node) {
     node.plugins
-        .register_mapping("os", Mapping::Leaf(self_as_leaf::<ThreadedOsArc>));
+        .register_mapping("os", Mapping::Leaf(self_as_leaf::<OsRoot>));
 
     node.plugins
         .register_mapping("processes", Mapping::Branch(ProcessList::map_into));
@@ -23,7 +23,39 @@ pub extern "C" fn on_node(node: &Node) {
 
 thread_types!(OsInstanceArcBox<'static>, ThreadedOs, ThreadedOsArc);
 
-impl Branch for ThreadedOsArc {
+#[repr(C)]
+#[derive(Clone, StableAbi)]
+pub struct OsRoot {
+    os: ThreadedOsArc,
+    plist: CArcSome<c_void>,
+}
+
+impl core::ops::Deref for OsRoot {
+    type Target = ThreadedOsArc;
+
+    fn deref(&self) -> &Self::Target {
+        &self.os
+    }
+}
+
+impl From<ThreadedOsArc> for OsRoot {
+    fn from(os: ThreadedOsArc) -> Self {
+        Self {
+            plist: CArcSome::from(ProcessList::from(os.clone())).into_opaque(),
+            os,
+        }
+    }
+}
+
+impl OsRoot {
+    unsafe fn plist(&self) -> &CArcSome<ProcessList> {
+        (&self.plist as *const CArcSome<c_void> as *const CArcSome<ProcessList>)
+            .as_ref()
+            .unwrap()
+    }
+}
+
+impl Branch for OsRoot {
     fn get_entry(&self, path: &str, plugins: &CPluginStore) -> Result<DirEntry> {
         branch::get_entry(self, path, plugins)
     }
@@ -41,10 +73,10 @@ impl Branch for ThreadedOsArc {
     }
 }
 
-impl Leaf for ThreadedOsArc {
+impl Leaf for OsRoot {
     fn open(&self) -> Result<FileOpsObj<c_void>> {
         Ok(FileOpsObj::new(
-            (**self).clone(),
+            (*self.os).clone(),
             Some(ThreadedOs::read),
             Some(ThreadedOs::write),
             Some(ThreadedOs::rpc),
@@ -52,8 +84,8 @@ impl Leaf for ThreadedOsArc {
     }
 }
 
-impl StrBuild<CArc<Arc<MemflowBackend>>> for ThreadedOsArc {
-    fn build(input: &str, ctx: &CArc<Arc<MemflowBackend>>) -> Result<ThreadedOsArc> {
+impl StrBuild<CArc<Arc<MemflowBackend>>> for OsRoot {
+    fn build(input: &str, ctx: &CArc<Arc<MemflowBackend>>) -> Result<Self> {
         let (chain_with, name, args) = split_args(input);
 
         let ctx = ctx.as_ref().ok_or(ErrorKind::NotFound)?;
@@ -77,6 +109,7 @@ impl StrBuild<CArc<Arc<MemflowBackend>>> for ThreadedOsArc {
                 Some(&str::parse(args).map_err(|_| ErrorKind::InvalidArgument)?),
             )
             .map(|c| ThreadedOs::from(c).self_arc_up())
+            .map(Self::from)
             .map_err(|_| ErrorKind::Uninitialized.into())
     }
 }
@@ -130,8 +163,8 @@ impl From<ThreadedOsArc> for ProcessList {
 }
 
 impl ProcessList {
-    extern "C" fn map_into(os: &ThreadedOsArc) -> COption<BranchBox<'static>> {
-        COption::Some(trait_obj!(ProcessList::from(os.clone()) as Branch))
+    extern "C" fn map_into(os: &OsRoot) -> COption<BranchBox<'static>> {
+        COption::Some(trait_obj!(unsafe { &**os.plist() }.clone() as Branch))
     }
 }
 

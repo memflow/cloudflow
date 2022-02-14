@@ -6,7 +6,7 @@ use connector::ThreadedConnectorArc;
 use filer::prelude::v1::*;
 pub use memflow::mem::MemData;
 use memflow::prelude::v1::*;
-use os::ThreadedOsArc;
+use os::OsRoot;
 use std::sync::Arc;
 
 pub mod connector;
@@ -33,7 +33,7 @@ pub fn create_node() -> CArcSome<Node> {
 
 pub struct MemflowBackend {
     connector: Arc<LocalBackend<ThreadedConnectorArc, Arc<Self>>>,
-    os: Arc<LocalBackend<ThreadedOsArc, Arc<Self>>>,
+    os: Arc<LocalBackend<OsRoot, Arc<Self>>>,
     inventory: Inventory,
 }
 
