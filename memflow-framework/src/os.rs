@@ -150,6 +150,7 @@ struct ProcessList {
     os: ThreadedOsArc,
     by_pid: PidProcessList,
     by_name: NameProcessList,
+    by_pid_name: PidNameProcessList,
 }
 
 impl From<ThreadedOsArc> for ProcessList {
@@ -157,6 +158,7 @@ impl From<ThreadedOsArc> for ProcessList {
         Self {
             by_pid: os.clone().into(),
             by_name: os.clone().into(),
+            by_pid_name: os.clone().into(),
             os,
         }
     }
@@ -175,6 +177,7 @@ impl Branch for ProcessList {
         match entry {
             "by-pid" => branch::forward_entry(self.by_pid.clone(), path, plugins),
             "by-name" => branch::forward_entry(self.by_name.clone(), path, plugins),
+            "by-pid-name" => branch::forward_entry(self.by_pid_name.clone(), path, plugins),
             addr => {
                 let addr: umem =
                     Num::from_str_radix(addr, 16).map_err(|_| ErrorKind::InvalidPath)?;
@@ -205,16 +208,23 @@ impl Branch for ProcessList {
             "by-name".into(),
             DirEntry::Branch(trait_obj!(self.by_name.clone() as Branch)),
         ));
+        let _ = out.call(BranchListEntry::new(
+            "by-pid-name".into(),
+            DirEntry::Branch(trait_obj!(self.by_pid_name.clone() as Branch)),
+        ));
 
-        self.os.get().process_info_list_callback(
-            (&mut |info: ProcessInfo| {
-                let addr = info.address.to_umem();
-                let proc = LazyProcessArc::from(LazyProcessBase::new(self.os.clone(), info));
-                let entry = DirEntry::Branch(trait_obj!(proc as Branch));
-                out.call(BranchListEntry::new(format!("{:x}", addr).into(), entry))
-            })
-                .into(),
-        );
+        self.os
+            .get()
+            .process_info_list_callback(
+                (&mut |info: ProcessInfo| {
+                    let addr = info.address.to_umem();
+                    let proc = LazyProcessArc::from(LazyProcessBase::new(self.os.clone(), info));
+                    let entry = DirEntry::Branch(trait_obj!(proc as Branch));
+                    out.call(BranchListEntry::new(format!("{:x}", addr).into(), entry))
+                })
+                    .into(),
+            )
+            .map_err(|_| ErrorKind::Unknown)?;
 
         Ok(())
     }
@@ -380,6 +390,105 @@ impl Branch for NameProcessList {
                             LazyProcessArc::from(LazyProcessBase::new(self.os.clone(), info));
                         let entry = DirEntry::Branch(trait_obj!(proc as Branch));
                         out.call(BranchListEntry::new(format!("{}", name).into(), entry))
+                    } else {
+                        true
+                    }
+                })
+                    .into(),
+            )
+            .map_err(|_| ErrorKind::Unknown)?;
+
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct PidNameProcessList {
+    os: ThreadedOsArc,
+    name_cache: CArcSome<DashMap<String, Address>>,
+}
+
+impl From<ThreadedOsArc> for PidNameProcessList {
+    fn from(os: ThreadedOsArc) -> Self {
+        Self {
+            os,
+            name_cache: DashMap::default().into(),
+        }
+    }
+}
+
+impl PidNameProcessList {
+    fn get_info(&self, name: &str) -> Result<ProcessInfo> {
+        let (name, pid) = name.rsplit_once(" ").ok_or(ErrorKind::InvalidArgument)?;
+        let pid = pid
+            .strip_prefix("(")
+            .and_then(|p| p.strip_suffix(")"))
+            .ok_or(ErrorKind::InvalidArgument)?;
+        let pid = str::parse(pid).map_err(|_| ErrorKind::InvalidArgument)?;
+
+        let info = if let Some(addr) = self.name_cache.get(name) {
+            let info = self
+                .os
+                .get()
+                .process_info_by_address(*addr)
+                .map_err(|_| ErrorKind::NotFound)?;
+
+            if &*info.name == name && info.pid == pid {
+                Some(info)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        info.map(|i| Ok(i)).unwrap_or_else(|| {
+            self.os
+                .get()
+                .process_info_by_pid(pid)
+                .map_err(|_| ErrorKind::NotFound.into())
+                .and_then(|i| {
+                    if &*i.name == name {
+                        Ok(i)
+                    } else {
+                        Err(ErrorKind::NotFound.into())
+                    }
+                })
+                .map(|info| {
+                    self.name_cache.insert(name.into(), info.address);
+                    info
+                })
+        })
+    }
+}
+
+impl Branch for PidNameProcessList {
+    fn get_entry(&self, path: &str, plugins: &CPluginStore) -> Result<DirEntry> {
+        let (name, path) = branch::split_path(path);
+
+        let info = self.get_info(name)?;
+
+        let proc = LazyProcessArc::from(LazyProcessBase::new(self.os.clone(), info));
+
+        if let Some(path) = path {
+            proc.get_entry(path, plugins)
+        } else {
+            Ok(DirEntry::Branch(trait_obj!(proc as Branch)))
+        }
+    }
+
+    fn list(&self, _: &CPluginStore, out: &mut OpaqueCallback<BranchListEntry>) -> Result<()> {
+        self.name_cache.clear();
+        self.os
+            .get()
+            .process_info_list_callback(
+                (&mut |info: ProcessInfo| {
+                    let name = format!("{} ({})", info.name, info.pid);
+                    if self.name_cache.insert(name.clone(), info.address).is_none() {
+                        let proc =
+                            LazyProcessArc::from(LazyProcessBase::new(self.os.clone(), info));
+                        let entry = DirEntry::Branch(trait_obj!(proc as Branch));
+                        out.call(BranchListEntry::new(name.into(), entry))
                     } else {
                         true
                     }
