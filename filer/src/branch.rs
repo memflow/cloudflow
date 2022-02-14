@@ -3,6 +3,7 @@ use crate::fs::*;
 use crate::plugin_store::*;
 
 use abi_stable::StableAbi;
+use cglue::trait_obj;
 
 pub use cglue::slice::CSliceMut;
 
@@ -32,6 +33,18 @@ pub fn map_entry<T: Branch + StableAbi>(
             Option::from(map(branch)).ok_or(ErrorKind::NotFound)?,
         )),
         _ => Err(ErrorKind::NotFound.into()),
+    }
+}
+
+pub fn forward_entry(
+    branch: impl Branch + 'static,
+    path: Option<&str>,
+    plugins: &CPluginStore,
+) -> Result<DirEntry> {
+    if let Some(path) = path {
+        branch.get_entry(path, plugins)
+    } else {
+        Ok(DirEntry::Branch(trait_obj!(branch as Branch)))
     }
 }
 

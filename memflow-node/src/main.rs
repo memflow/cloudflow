@@ -234,7 +234,7 @@ fn main() -> Result<()> {
 
     let mut conn_new = node.open_cursor("connector/new")?;
     write!(conn_new, "kcore kcore")?;
-    write!(conn_new, "qemu_win10 -c native qemu:win10-clone")?;
+    write!(conn_new, "qemu_win10 -c native qemu:win10-hw")?;
 
     write!(os_new, "win -c qemu_win10 win32")?;
 
