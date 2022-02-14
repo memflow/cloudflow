@@ -5,23 +5,20 @@ pub use cglue::slice::CSliceMut;
 use cglue::trait_group::c_void;
 use core::mem::MaybeUninit;
 
-/// Defines new threaded wrapper types.
+/// Defines new arc wrapper types.
 ///
-/// This will define `$new` type which will contain `ThreadCtx<$type>`, as well as `$new_arc` type
+/// This will define `$new` type which will contain `$type`, as well as `$new_arc` type
 /// which is effectively `CArcSome<$new>`.
 ///
 /// Typically, read/write/rpc operations would be implemented on `$new`, while `Branch`/`Leaf`
 /// traits would be implemented on `$new_arc`. This is done in such a way so that CGlue can nicely
 /// opaquify objects while not hiding reference counts from filesystem.
 #[macro_export]
-macro_rules! thread_types {
+macro_rules! arc_types {
     ($type:ty, $new:ident, $new_arc: ident) => {
-        $crate::thread_types!($type, $new, $new_arc, 32);
-    };
-    ($type:ty, $new:ident, $new_arc: ident, $threads:expr) => {
         #[derive(StableAbi)]
         #[repr(transparent)]
-        pub struct $new($crate::thread_ctx::ThreadCtx<$type>);
+        pub struct $new($type);
 
         #[derive(Clone, StableAbi)]
         #[repr(transparent)]
@@ -33,7 +30,7 @@ macro_rules! thread_types {
 
         impl From<$type> for $new {
             fn from(input: $type) -> Self {
-                Self(ThreadCtx::new(input, $threads))
+                Self(input)
             }
         }
 
@@ -44,7 +41,7 @@ macro_rules! thread_types {
         }
 
         impl core::ops::Deref for $new {
-            type Target = $crate::thread_ctx::ThreadCtx<$type>;
+            type Target = $type;
 
             fn deref(&self) -> &Self::Target {
                 &self.0
@@ -68,6 +65,35 @@ macro_rules! thread_types {
         impl From<$crate::thread_ctx::CArcSome<$new>> for $new_arc {
             fn from(arc: $crate::thread_ctx::CArcSome<$new>) -> Self {
                 $new_arc(arc)
+            }
+        }
+    };
+}
+
+/// Defines new threaded wrapper types.
+///
+/// This will define `$new` type which will contain `ThreadCtx<$type>`, as well as `$new_arc` type
+/// which is effectively `CArcSome<$new>`.
+///
+/// This is effetively an alias for `arc_types!(ThreadCtx<$type>, $new, $new_arc)` with a few extra
+/// helpers.
+#[macro_export]
+macro_rules! thread_types {
+    ($type:ty, $new:ident, $new_arc: ident) => {
+        $crate::thread_types!($type, $new, $new_arc, 32);
+    };
+    ($type:ty, $new:ident, $new_arc: ident, $threads:expr) => {
+        $crate::arc_types!($crate::thread_ctx::ThreadCtx<$type>, $new, $new_arc);
+
+        impl From<$type> for $new {
+            fn from(input: $type) -> Self {
+                Self($crate::thread_ctx::ThreadCtx::new(input, $threads))
+            }
+        }
+
+        impl From<$type> for $new_arc {
+            fn from(input: $type) -> Self {
+                Self($new::from(input).into())
             }
         }
     };

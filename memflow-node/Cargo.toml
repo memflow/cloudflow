@@ -11,5 +11,7 @@ anyhow = "1"
 ptree = "0.4"
 rand = "0.8"
 rand_xorshift = "0.3"
-memflow = { git = "https://github.com/memflow/memflow", branch = "next" }
+memflow = "^0.2.0-beta"
 filer = { version = "0.1", path = "../filer" }
+simplelog = "^0.11.1"
+log = "0.4"

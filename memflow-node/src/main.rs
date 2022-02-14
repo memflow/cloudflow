@@ -216,6 +216,13 @@ fn rwtest(
 }
 
 fn main() -> Result<()> {
+    simplelog::TermLogger::init(
+        log::Level::Info.to_level_filter(),
+        simplelog::Config::default(),
+        simplelog::TerminalMode::Stdout,
+        simplelog::ColorChoice::Auto,
+    )
+    .unwrap();
     println!("Create node");
 
     let node = create_node();
@@ -227,7 +234,9 @@ fn main() -> Result<()> {
 
     let mut conn_new = node.open_cursor("connector/new")?;
     write!(conn_new, "kcore kcore")?;
-    write!(conn_new, "qemu_win10 -c native qemu:win10-hw")?;
+    write!(conn_new, "qemu_win10 -c native qemu:win10-clone")?;
+
+    write!(os_new, "win -c qemu_win10 win32")?;
 
     println!("List tree");
 
@@ -243,7 +252,7 @@ fn main() -> Result<()> {
 
     let mut buf = vec![0; 4096];
 
-    let cr3 = 0x7eae10000u64;
+    /*let cr3 = 0x7eae10000u64;
 
     let mut iter = std::iter::once(CTup2(cr3, CSliceMut::from(buf.as_mut_slice())));
 
@@ -254,11 +263,11 @@ fn main() -> Result<()> {
     for chunk in buf.chunks(8) {
         let v = u64::from_ne_bytes(<[u8; 8]>::try_from(chunk).unwrap());
         print!("{:x}, ", v);
-    }
+    }*/
 
     println!();
 
-    rwtest(
+    /*rwtest(
         &node,
         handle,
         cr3,
@@ -275,7 +284,7 @@ fn main() -> Result<()> {
         &[0x10000, 0x1000, 0x100, 0x10, 0x8],
         &[32, 8, 1],
         0x0010_0000,
-    );
+    );*/
 
     Ok(())
 }

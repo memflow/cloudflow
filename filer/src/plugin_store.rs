@@ -189,17 +189,23 @@ impl PluginStore {
         layout: &'static TypeLayout,
     ) -> Entry<DashMap<String, OpaqueMapping>> {
         let idx = *self.type_map.entry(id).or_insert_with(|| {
-            self.layouts
+            let (idx, inserted) = self
+                .layouts
                 .iter()
                 .find(|p| check_layout_compatibility(layout, p.value()).is_ok())
-                .map(|p| *p.key())
+                .map(|p| (*p.key(), true))
                 .or_else(|| {
-                    self.entry_list.insert(Default::default()).map(|i| {
-                        self.layouts.insert(i, layout);
-                        i
-                    })
+                    self.entry_list
+                        .insert(Default::default())
+                        .map(|i| (i, false))
                 })
-                .expect("Slab is full!")
+                .expect("Slab is full!");
+
+            if !inserted {
+                self.layouts.insert(idx, layout);
+            }
+
+            idx
         });
 
         self.entry_list.get(idx).unwrap()

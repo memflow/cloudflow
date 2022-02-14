@@ -8,11 +8,51 @@ use filer::branch;
 use filer::prelude::v1::{Error, ErrorKind, ErrorOrigin, Result, *};
 pub use memflow::mem::MemData;
 use memflow::prelude::v1::*;
+use num::Num;
+use once_cell::sync::OnceCell;
 use std::sync::Arc;
 
 #[repr(transparent)]
 #[derive(StableAbi, Clone)]
 pub struct ProcessListArc(ThreadedOsArc);
+
+#[repr(C)]
+#[derive(StableAbi, Clone)]
+pub struct LazyProcessBase {
+    os: ThreadedOsArc,
+    proc_info: ProcessInfo,
+    proc_box: CArcSome<c_void>,
+    get_proc: unsafe extern "C" fn(&LazyProcessBase) -> Option<&ThreadedProcessArc>,
+}
+
+impl LazyProcessBase {
+    unsafe extern "C" fn get_proc(&self) -> Option<&ThreadedProcessArc> {
+        let proc_box = &*self.proc_box as *const c_void as *const OnceCell<ThreadedProcessArc>;
+
+        (*proc_box)
+            .get_or_try_init(|| {
+                self.os
+                    .get_orig()
+                    .clone()
+                    .into_process_by_info(self.proc_info.clone())
+                    .map(ThreadedProcessArc::from)
+            })
+            .ok()
+    }
+
+    pub fn proc(&self) -> Option<&ThreadedProcessArc> {
+        unsafe { (self.get_proc)(self) }
+    }
+
+    pub fn new(os: ThreadedOsArc, proc_info: ProcessInfo) -> Self {
+        Self {
+            os,
+            proc_info,
+            proc_box: CArcSome::from(OnceCell::<ThreadedProcessArc>::new()).into_opaque(),
+            get_proc: Self::get_proc,
+        }
+    }
+}
 
 impl ProcessListArc {
     extern "C" fn map_into(os: &ThreadedOsArc) -> COption<BranchBox<'static>> {
@@ -24,16 +64,16 @@ impl Branch for ProcessListArc {
     fn get_entry(&self, path: &str, plugins: &CPluginStore) -> Result<DirEntry> {
         let (pid, path) = branch::split_path(path);
 
-        let pid = str::parse(pid).map_err(|_| ErrorKind::InvalidPath)?;
+        let addr: umem = Num::from_str_radix(pid, 16).map_err(|_| ErrorKind::InvalidPath)?;
 
-        let proc = self
+        let info = self
             .0
             .get_orig()
             .clone()
-            .into_process_by_pid(pid)
+            .process_info_by_address(addr.into())
             .map_err(|_| ErrorKind::NotFound)?;
 
-        let proc = ThreadedProcessArc::from(proc);
+        let proc = LazyProcessArc::from(LazyProcessBase::new(self.0.clone(), info));
 
         if let Some(path) = path {
             proc.get_entry(path, plugins)
@@ -49,14 +89,10 @@ impl Branch for ProcessListArc {
     ) -> Result<()> {
         self.0.get().process_info_list_callback(
             (&mut |info: ProcessInfo| {
-                if let Ok(proc) = self.0.get_orig().clone().into_process_by_info(info) {
-                    let pid = proc.info().pid;
-                    let proc = ThreadedProcessArc::from(proc);
-                    let entry = DirEntry::Branch(trait_obj!(proc as Branch));
-                    out.call(BranchListEntry::new(format!("{}", pid).into(), entry))
-                } else {
-                    true
-                }
+                let addr = info.address.to_umem();
+                let proc = LazyProcessArc::from(LazyProcessBase::new(self.0.clone(), info));
+                let entry = DirEntry::Branch(trait_obj!(proc as Branch));
+                out.call(BranchListEntry::new(format!("{:x}", addr).into(), entry))
             })
                 .into(),
         );
@@ -85,7 +121,7 @@ pub fn create_node() -> CArcSome<Node> {
         .register_mapping("processes", Mapping::Branch(ProcessListArc::map_into));
 
     node.plugins
-        .register_mapping("mem", Mapping::Leaf(self_as_leaf::<ThreadedProcessArc>));
+        .register_mapping("mem", Mapping::Leaf(self_as_leaf::<LazyProcessArc>));
 
     node.plugins
         .register_mapping("mem", Mapping::Leaf(self_as_leaf::<ThreadedConnectorArc>));
@@ -359,7 +395,9 @@ thread_types!(
     ThreadedProcessArc
 );
 
-impl Branch for ThreadedProcessArc {
+arc_types!(LazyProcessBase, LazyProcess, LazyProcessArc);
+
+impl Branch for LazyProcessArc {
     fn get_entry(&self, path: &str, plugins: &CPluginStore) -> Result<DirEntry> {
         branch::get_entry(self, path, plugins)
     }
@@ -377,10 +415,10 @@ impl Branch for ThreadedProcessArc {
     }
 }
 
-impl Leaf for ThreadedProcessArc {
+impl Leaf for LazyProcessArc {
     fn open(&self) -> Result<FileOpsObj<c_void>> {
         Ok(FileOpsObj::new(
-            (**self).clone(),
+            self.proc().ok_or(ErrorKind::Uninitialized)?.clone().into(),
             Some(ThreadedProcess::read),
             Some(ThreadedProcess::write),
             Some(ThreadedProcess::rpc),
