@@ -15,8 +15,8 @@ use cglue::trait_group::c_void;
 /// This is effectively needed when defining `extern "C"` functions that for file ops.
 #[macro_export]
 macro_rules! int_res_wrap {
-    ($expr:expr) => {
-        let __wrapped_fn = || -> $crate::error::Result<()> { $expr };
+    ($($expr:tt)*) => {
+        let __wrapped_fn = || -> $crate::error::Result<()> { $($expr)* };
         __wrapped_fn().into_int_result()
     };
 }

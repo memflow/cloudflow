@@ -78,5 +78,5 @@ pub fn list<T: Branch + StableAbi>(
             .into(),
     );
 
-    ret.into_iter().collect()
+    Ok(ret.into_iter().filter_map(Result::ok).collect())
 }

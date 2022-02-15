@@ -320,21 +320,39 @@ impl<'a, T> From<(&'a T, usize, Size)> for ObjCursor<'a, T> {
 
 impl<'a, T: Frontend> std::io::Read for ObjCursor<'a, T> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.0
+        let read = self
+            .0
             .read((&mut core::iter::once(CTup2(self.1, buf.into()))).into())
+            .map(|_| buf.len())
+            .or_else(|e| {
+                if e.1 == ErrorKind::OutOfBounds {
+                    Ok(0)
+                } else {
+                    Err(e)
+                }
+            })
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.as_str()))?;
-        self.1 += buf.len() as Size;
-        Ok(buf.len())
+        self.1 += read as Size;
+        Ok(read)
     }
 }
 
 impl<'a, T: Frontend> std::io::Write for ObjCursor<'a, T> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0
+        let written = self
+            .0
             .write((&mut core::iter::once(CTup2(self.1, buf.into()))).into())
+            .map(|_| buf.len())
+            .or_else(|e| {
+                if e.1 == ErrorKind::OutOfBounds {
+                    Ok(0)
+                } else {
+                    Err(e)
+                }
+            })
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.as_str()))?;
-        self.1 += buf.len() as Size;
-        Ok(buf.len())
+        self.1 += written as Size;
+        Ok(written)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {

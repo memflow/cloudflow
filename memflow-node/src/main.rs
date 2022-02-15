@@ -286,5 +286,20 @@ fn main() -> Result<()> {
         0x0010_0000,
     );*/
 
+    for path in &[
+        "os/native/processes/by-name/memflow-node/maps",
+        "os/win/processes/by-name/lsass.exe/phys_maps",
+    ] {
+        let maps_handle = node.open_cursor(path)?;
+
+        let maps_handle = std::io::BufReader::new(maps_handle);
+
+        use std::io::BufRead;
+
+        for line in maps_handle.lines() {
+            println!("{}", line?);
+        }
+    }
+
     Ok(())
 }

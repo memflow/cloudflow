@@ -13,6 +13,12 @@ use once_cell::sync::OnceCell;
 pub extern "C" fn on_node(node: &Node) {
     node.plugins
         .register_mapping("mem", Mapping::Leaf(self_as_leaf::<LazyProcessArc>));
+
+    node.plugins
+        .register_mapping("maps", Mapping::Leaf(ProcessMaps::map_into));
+
+    node.plugins
+        .register_mapping("phys_maps", Mapping::Leaf(ProcessPhysMaps::map_into));
 }
 
 thread_types!(
@@ -114,6 +120,207 @@ impl LazyProcessBase {
             proc_info,
             proc_box: CArcSome::from(OnceCell::<ThreadedProcessArc>::new()).into_opaque(),
             get_proc: Self::get_proc,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ProcessMaps {
+    proc: LazyProcessArc,
+    maps: OnceCell<String>,
+}
+
+impl Leaf for ProcessMaps {
+    fn open(&self) -> Result<FileOpsObj<c_void>> {
+        Ok(FileOpsObj::new(
+            self.clone().into(),
+            Some(ProcessMaps::read),
+            None,
+            None,
+        ))
+    }
+}
+
+impl From<LazyProcessArc> for ProcessMaps {
+    fn from(proc: LazyProcessArc) -> Self {
+        Self {
+            proc,
+            maps: Default::default(),
+        }
+    }
+}
+
+impl ProcessMaps {
+    extern "C" fn map_into(proc: &LazyProcessArc) -> COption<LeafBox<'static>> {
+        COption::Some(trait_obj!(ProcessMaps::from(proc.clone()) as Leaf))
+    }
+
+    extern "C" fn read(&self, data: CIterator<RWData>) -> i32 {
+        int_res_wrap! {
+
+            let maps = self.maps.get_or_try_init::<_, ErrorKind>(|| {
+                let proc = self.proc.proc().ok_or(ErrorKind::Uninitialized)?;
+                let mut proc = proc.get();
+
+                let maps = proc.mapped_mem_vec(-1);
+                let mut modules = proc.module_list().map_err(|_| ErrorKind::Unknown)?;
+                modules.sort_by_key(|m| m.base.to_umem());
+
+                let out = maps
+                    .into_iter()
+                    .map(|MemData(vaddr, size)| {
+                        let module = modules
+                            .iter()
+                            .find(|m| m.base <= vaddr && m.base + m.size > vaddr);
+
+                        /*let perms = format!(
+                            "r{}{}",
+                            if paddr.page_type().contains(PageType::WRITEABLE) {
+                                'w'
+                            } else {
+                                '-'
+                            },
+                            if !paddr.page_type().contains(PageType::NOEXEC) {
+                                'x'
+                            } else {
+                                '-'
+                            }
+                        );*/
+
+                        // TODO: Add perms to memflow
+                        let perms = "r??";
+
+                        format!(
+                            "{:x}-{:x} {} {}\n",
+                            vaddr,
+                            vaddr + size,
+                            perms,
+                            module.map(|m| m.name.as_ref()).unwrap_or_default()
+                        )
+                    })
+                    .collect();
+
+                Ok(out)
+            })?;
+
+            let maps = maps.as_bytes();
+
+            for CTup2(off, mut to) in data {
+
+                if off >= maps.len() as _ {
+                    return Err(ErrorKind::OutOfBounds.into());
+                }
+
+                let maps = &maps[std::cmp::min(off as usize, maps.len())..];
+                let min_len = std::cmp::min(maps.len(), to.len());
+                to[..min_len].copy_from_slice(&maps[..min_len]);
+            }
+
+            Ok(())
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ProcessPhysMaps {
+    proc: LazyProcessArc,
+    maps: OnceCell<String>,
+}
+
+impl Leaf for ProcessPhysMaps {
+    fn open(&self) -> Result<FileOpsObj<c_void>> {
+        Ok(FileOpsObj::new(
+            self.clone().into(),
+            Some(ProcessPhysMaps::read),
+            None,
+            None,
+        ))
+    }
+}
+
+impl From<LazyProcessArc> for ProcessPhysMaps {
+    fn from(proc: LazyProcessArc) -> Self {
+        Self {
+            proc,
+            maps: Default::default(),
+        }
+    }
+}
+
+impl ProcessPhysMaps {
+    extern "C" fn map_into(proc: &LazyProcessArc) -> COption<LeafBox<'static>> {
+        if proc
+            .proc()
+            .and_then(|proc| as_ref!(proc.get_orig() impl VirtualTranslate))
+            .is_some()
+        {
+            COption::Some(trait_obj!(ProcessPhysMaps::from(proc.clone()) as Leaf))
+        } else {
+            COption::None
+        }
+    }
+
+    extern "C" fn read(&self, data: CIterator<RWData>) -> i32 {
+        int_res_wrap! {
+
+            let maps = self.maps.get_or_try_init::<_, ErrorKind>(|| {
+                let proc = self.proc.proc().ok_or(ErrorKind::Uninitialized)?;
+                let mut proc = proc.get();
+                let proc = as_mut!(proc impl VirtualTranslate).ok_or(ErrorKind::NotSupported)?;
+
+                let maps = proc.virt_translation_map_vec();
+                let mut modules = proc.module_list().map_err(|_| ErrorKind::Unknown)?;
+                modules.sort_by_key(|m| m.base.to_umem());
+
+                let out = maps
+                    .into_iter()
+                    .map(|tr| {
+                        let module = modules
+                            .iter()
+                            .find(|m| m.base <= tr.in_virtual && m.base + m.size > tr.in_virtual);
+
+                        let perms = format!(
+                            "r{}{}",
+                            if tr.out_physical.page_type().contains(PageType::WRITEABLE) {
+                                'w'
+                            } else {
+                                '-'
+                            },
+                            if !tr.out_physical.page_type().contains(PageType::NOEXEC) {
+                                'x'
+                            } else {
+                                '-'
+                            }
+                        );
+
+                        format!(
+                            "{:x}-{:x} {} {:9x} {}\n",
+                            tr.in_virtual,
+                            tr.in_virtual + tr.size,
+                            perms,
+                            tr.out_physical.address,
+                            module.map(|m| m.name.as_ref()).unwrap_or_default()
+                        )
+                    })
+                    .collect();
+
+                Ok(out)
+            })?;
+
+            let maps = maps.as_bytes();
+
+            for CTup2(off, mut to) in data {
+
+                if off >= maps.len() as _ {
+                    return Err(ErrorKind::OutOfBounds.into());
+                }
+
+                let maps = &maps[std::cmp::min(off as usize, maps.len())..];
+                let min_len = std::cmp::min(maps.len(), to.len());
+                to[..min_len].copy_from_slice(&maps[..min_len]);
+            }
+
+            Ok(())
         }
     }
 }
