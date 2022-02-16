@@ -134,3 +134,50 @@ impl<T> FileOpsObj<T> {
 unsafe impl<T> cglue::trait_group::Opaquable for FileOpsObj<T> {
     type OpaqueTarget = FileOpsObj<c_void>;
 }
+
+#[derive(Clone)]
+pub struct FnFile<C, D> {
+    ctx: C,
+    data: once_cell::sync::OnceCell<D>,
+    func: fn(&C) -> Result<D>,
+}
+
+impl<C: Clone + 'static, D: AsRef<[u8]> + Clone + 'static> Leaf for FnFile<C, D> {
+    fn open(&self) -> Result<FileOpsObj<c_void>> {
+        Ok(FileOpsObj::new(
+            self.clone().into(),
+            Some(Self::read),
+            None,
+            None,
+        ))
+    }
+}
+
+impl<C, D: AsRef<[u8]>> FnFile<C, D> {
+    pub fn new(ctx: C, func: fn(&C) -> Result<D>) -> Self {
+        Self {
+            ctx,
+            data: Default::default(),
+            func,
+        }
+    }
+
+    extern "C" fn read(&self, data: CIterator<RWData>) -> i32 {
+        int_res_wrap! {
+            let file = self.data.get_or_try_init(|| (self.func)(&self.ctx))?;
+            let file: &[u8] = file.as_ref();
+
+            for CTup2(off, mut to) in data {
+                if off >= file.len() as _ {
+                    return Err(ErrorKind::OutOfBounds.into());
+                }
+
+                let maps = &file[std::cmp::min(off as usize, file.len())..];
+                let min_len = std::cmp::min(maps.len(), to.len());
+                to[..min_len].copy_from_slice(&maps[..min_len]);
+            }
+
+            Ok(())
+        }
+    }
+}
