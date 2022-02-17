@@ -12,10 +12,10 @@ use once_cell::sync::OnceCell;
 
 pub extern "C" fn on_node(node: &Node) {
     node.plugins
-        .register_mapping("mem", Mapping::Leaf(map_into_maps));
+        .register_mapping("mem", Mapping::Leaf(self_as_leaf::<LazyProcessArc>));
 
     node.plugins
-        .register_mapping("maps", Mapping::Leaf(ProcessMaps::map_into));
+        .register_mapping("maps", Mapping::Leaf(map_into_maps));
 
     node.plugins
         .register_mapping("phys_maps", Mapping::Leaf(map_into_phys_maps));
@@ -59,23 +59,23 @@ impl Leaf for LazyProcessArc {
 }
 
 impl ThreadedProcess {
-    extern "C" fn read(&self, data: CIterator<RWData>) -> i32 {
+    extern "C" fn read(&self, data: VecOps<RWData>) -> i32 {
         int_res_wrap! {
             self.get()
                 .read_raw_iter(
-                    (&mut memdata_map(data)).into(),
-                    &mut (&mut |_: ReadData| true).into(),
+                    (&mut memdata_map(data.inp)).into(),
+                    &mut (&mut memdata_unmap(data.out_fail)).into(),
                 )
                 .map_err(|_| Error(ErrorOrigin::Read, ErrorKind::Unknown))
         }
     }
 
-    extern "C" fn write(&self, data: CIterator<ROData>) -> i32 {
+    extern "C" fn write(&self, data: VecOps<ROData>) -> i32 {
         int_res_wrap! {
             self.get()
                 .write_raw_iter(
-                    (&mut memdata_map(data)).into(),
-                    &mut (&mut |_: WriteData| true).into(),
+                    (&mut memdata_map(data.inp)).into(),
+                    &mut (&mut memdata_unmap(data.out_fail)).into(),
                 )
                 .map_err(|_| Error(ErrorOrigin::Write, ErrorKind::Unknown))
         }
@@ -124,157 +124,52 @@ impl LazyProcessBase {
     }
 }
 
-#[derive(Clone)]
-struct ProcessMaps {
-    proc: LazyProcessArc,
-    maps: OnceCell<String>,
-}
-
-impl Leaf for ProcessMaps {
-    fn open(&self) -> Result<FileOpsObj<c_void>> {
-        Ok(FileOpsObj::new(
-            self.clone().into(),
-            Some(ProcessMaps::read),
-            None,
-            None,
-        ))
-    }
-}
-
-impl From<LazyProcessArc> for ProcessMaps {
-    fn from(proc: LazyProcessArc) -> Self {
-        Self {
-            proc,
-            maps: Default::default(),
-        }
-    }
-}
-
-impl ProcessMaps {
-    extern "C" fn map_into(proc: &LazyProcessArc) -> COption<LeafBox<'static>> {
-        COption::Some(trait_obj!(ProcessMaps::from(proc.clone()) as Leaf))
-    }
-
-    extern "C" fn read(&self, data: CIterator<RWData>) -> i32 {
-        int_res_wrap! {
-
-            let maps = self.maps.get_or_try_init::<_, ErrorKind>(|| {
-                let proc = self.proc.proc().ok_or(ErrorKind::Uninitialized)?;
-                let mut proc = proc.get();
-
-                let maps = proc.mapped_mem_vec(-1);
-                let mut modules = proc.module_list().map_err(|_| ErrorKind::Unknown)?;
-                modules.sort_by_key(|m| m.base.to_umem());
-
-                let out = maps
-                    .into_iter()
-                    .map(|MemData(vaddr, size)| {
-                        let module = modules
-                            .iter()
-                            .find(|m| m.base <= vaddr && m.base + m.size > vaddr);
-
-                        /*let perms = format!(
-                            "r{}{}",
-                            if paddr.page_type().contains(PageType::WRITEABLE) {
-                                'w'
-                            } else {
-                                '-'
-                            },
-                            if !paddr.page_type().contains(PageType::NOEXEC) {
-                                'x'
-                            } else {
-                                '-'
-                            }
-                        );*/
-
-                        // TODO: Add perms to memflow
-                        let perms = "r??";
-
-                        format!(
-                            "{:x}-{:x} {} {}\n",
-                            vaddr,
-                            vaddr + size,
-                            perms,
-                            module.map(|m| m.name.as_ref()).unwrap_or_default()
-                        )
-                    })
-                    .collect();
-
-                Ok(out)
-            })?;
-
-            let maps = maps.as_bytes();
-
-            for CTup2(off, mut to) in data {
-
-                if off >= maps.len() as _ {
-                    return Err(ErrorKind::OutOfBounds.into());
-                }
-
-                let maps = &maps[std::cmp::min(off as usize, maps.len())..];
-                let min_len = std::cmp::min(maps.len(), to.len());
-                to[..min_len].copy_from_slice(&maps[..min_len]);
-            }
-
-            Ok(())
-        }
-    }
-}
-
 extern "C" fn map_into_maps(proc: &LazyProcessArc) -> COption<LeafBox<'static>> {
-    if proc
-        .proc()
-        .and_then(|proc| as_ref!(proc.get_orig() impl VirtualTranslate))
-        .is_some()
-    {
-        let file = FnFile::new(proc.clone(), |proc| {
-            let proc = proc.proc().ok_or(ErrorKind::Uninitialized)?;
-            let mut proc = proc.get();
+    let file = FnFile::new(proc.clone(), |proc| {
+        let proc = proc.proc().ok_or(ErrorKind::Uninitialized)?;
+        let mut proc = proc.get();
 
-            let maps = proc.mapped_mem_vec(-1);
-            let mut modules = proc.module_list().map_err(|_| ErrorKind::Unknown)?;
-            modules.sort_by_key(|m| m.base.to_umem());
+        let maps = proc.mapped_mem_vec(-1);
+        let mut modules = proc.module_list().map_err(|_| ErrorKind::Uninitialized)?;
+        modules.sort_by_key(|m| m.base.to_umem());
 
-            let out = maps
-                .into_iter()
-                .map(|MemData(vaddr, size)| {
-                    let module = modules
-                        .iter()
-                        .find(|m| m.base <= vaddr && m.base + m.size > vaddr);
+        let out = maps
+            .into_iter()
+            .map(|MemData(vaddr, size)| {
+                let module = modules
+                    .iter()
+                    .find(|m| m.base <= vaddr && m.base + m.size > vaddr);
 
-                    /*let perms = format!(
-                        "r{}{}",
-                        if paddr.page_type().contains(PageType::WRITEABLE) {
-                            'w'
-                        } else {
-                            '-'
-                        },
-                        if !paddr.page_type().contains(PageType::NOEXEC) {
-                            'x'
-                        } else {
-                            '-'
-                        }
-                    );*/
+                /*let perms = format!(
+                    "r{}{}",
+                    if paddr.page_type().contains(PageType::WRITEABLE) {
+                        'w'
+                    } else {
+                        '-'
+                    },
+                    if !paddr.page_type().contains(PageType::NOEXEC) {
+                        'x'
+                    } else {
+                        '-'
+                    }
+                );*/
 
-                    // TODO: Add perms to memflow
-                    let perms = "r??";
+                // TODO: Add perms to memflow
+                let perms = "r??";
 
-                    format!(
-                        "{:x}-{:x} {} {}\n",
-                        vaddr,
-                        vaddr + size,
-                        perms,
-                        module.map(|m| m.name.as_ref()).unwrap_or_default()
-                    )
-                })
-                .collect::<String>();
+                format!(
+                    "{:x}-{:x} {} {}\n",
+                    vaddr,
+                    vaddr + size,
+                    perms,
+                    module.map(|m| m.name.as_ref()).unwrap_or_default()
+                )
+            })
+            .collect::<String>();
 
-            Ok(out)
-        });
-        COption::Some(trait_obj!(file as Leaf))
-    } else {
-        COption::None
-    }
+        Ok(out)
+    });
+    COption::Some(trait_obj!(file as Leaf))
 }
 
 extern "C" fn map_into_phys_maps(proc: &LazyProcessArc) -> COption<LeafBox<'static>> {

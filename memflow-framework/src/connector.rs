@@ -80,25 +80,25 @@ impl StrBuild<CArc<Arc<MemflowBackend>>> for ThreadedConnectorArc {
 }
 
 impl ThreadedConnector {
-    extern "C" fn read(&self, data: CIterator<RWData>) -> i32 {
+    extern "C" fn read(&self, data: VecOps<RWData>) -> i32 {
         int_res_wrap! {
             self.get()
                 .phys_view()
                 .read_raw_iter(
-                    (&mut memdata_map(data)).into(),
-                    &mut (&mut |_: ReadData| true).into(),
+                    (&mut memdata_map(data.inp)).into(),
+                    &mut (&mut memdata_unmap(data.out_fail)).into(),
                 )
                 .map_err(|_| Error(ErrorOrigin::Read, ErrorKind::Unknown))
         }
     }
 
-    extern "C" fn write(&self, data: CIterator<ROData>) -> i32 {
+    extern "C" fn write(&self, data: VecOps<ROData>) -> i32 {
         int_res_wrap! {
             self.get()
                 .phys_view()
                 .write_raw_iter(
-                    (&mut memdata_map(data)).into(),
-                    &mut (&mut |_: WriteData| true).into(),
+                    (&mut memdata_map(data.inp)).into(),
+                    &mut (&mut memdata_unmap(data.out_fail)).into(),
                 )
                 .map_err(|_| Error(ErrorOrigin::Write, ErrorKind::Unknown))
         }

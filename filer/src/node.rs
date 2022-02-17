@@ -44,11 +44,11 @@ impl Node {
 
 impl Frontend for CArcSome<Node> {
     /// Perform read operation on the given handle
-    fn read(&self, handle: usize, data: CIterator<RWData>) -> Result<()> {
+    fn read<'a>(&self, handle: usize, data: VecOps<RWData>) -> Result<()> {
         self.backend.read(self.into(), handle, data)
     }
     /// Perform write operation on the given handle.
-    fn write(&self, handle: usize, data: CIterator<ROData>) -> Result<()> {
+    fn write(&self, handle: usize, data: VecOps<ROData>) -> Result<()> {
         self.backend.write(self.into(), handle, data)
     }
     /// Perform remote procedure call on the given handle.
@@ -87,11 +87,11 @@ impl NodeBackend {
 }
 
 impl<T: Backend> Backend for std::sync::Arc<T> {
-    fn read(&self, stack: BackendStack, handle: usize, data: CIterator<RWData>) -> Result<()> {
+    fn read(&self, stack: BackendStack, handle: usize, data: VecOps<RWData>) -> Result<()> {
         (**self).read(stack, handle, data)
     }
 
-    fn write(&self, stack: BackendStack, handle: usize, data: CIterator<ROData>) -> Result<()> {
+    fn write(&self, stack: BackendStack, handle: usize, data: VecOps<ROData>) -> Result<()> {
         (**self).write(stack, handle, data)
     }
 
@@ -121,11 +121,11 @@ impl<T: Backend> Backend for std::sync::Arc<T> {
 }
 
 impl<T: Backend> Backend for CArcSome<T> {
-    fn read(&self, stack: BackendStack, handle: usize, data: CIterator<RWData>) -> Result<()> {
+    fn read(&self, stack: BackendStack, handle: usize, data: VecOps<RWData>) -> Result<()> {
         (**self).read(stack, handle, data)
     }
 
-    fn write(&self, stack: BackendStack, handle: usize, data: CIterator<ROData>) -> Result<()> {
+    fn write(&self, stack: BackendStack, handle: usize, data: VecOps<ROData>) -> Result<()> {
         (**self).write(stack, handle, data)
     }
 
@@ -155,7 +155,7 @@ impl<T: Backend> Backend for CArcSome<T> {
 }
 
 impl Backend for NodeBackend {
-    fn read(&self, stack: BackendStack, handle: usize, data: CIterator<RWData>) -> Result<()> {
+    fn read(&self, stack: BackendStack, handle: usize, data: VecOps<RWData>) -> Result<()> {
         match self.handles.get(handle).as_ref().map(|v| &**v) {
             Some(&HandleMap::Forward(backend, handle)) => {
                 if let Some(backend) = self.backends.get(backend) {
@@ -169,7 +169,7 @@ impl Backend for NodeBackend {
         }
     }
 
-    fn write(&self, stack: BackendStack, handle: usize, data: CIterator<ROData>) -> Result<()> {
+    fn write(&self, stack: BackendStack, handle: usize, data: VecOps<ROData>) -> Result<()> {
         match self.handles.get(handle).as_ref().map(|v| &**v) {
             Some(&HandleMap::Forward(backend, handle)) => {
                 if let Some(backend) = self.backends.get(backend) {
@@ -254,9 +254,9 @@ impl Backend for NodeBackend {
 #[int_result]
 pub trait Frontend {
     /// Perform read operation on the given handle
-    fn read(&self, handle: usize, data: CIterator<RWData>) -> Result<()>;
+    fn read(&self, handle: usize, data: VecOps<RWData>) -> Result<()>;
     /// Perform write operation on the given handle.
-    fn write(&self, handle: usize, data: CIterator<ROData>) -> Result<()>;
+    fn write(&self, handle: usize, data: VecOps<ROData>) -> Result<()>;
     /// Perform remote procedure call on the given handle.
     fn rpc(&self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()>;
     /// Open a leaf at the given path. The result is a handle.
@@ -291,11 +291,11 @@ impl<'a, T> From<(&'a T, usize)> for ObjHandle<'a, T> {
 
 impl<'a, T: Frontend> ObjHandle<'a, T> {
     /// Perform read operation on the given handle
-    pub fn read(&self, data: CIterator<RWData>) -> Result<()> {
+    pub fn read(&self, data: VecOps<RWData>) -> Result<()> {
         self.0.read(self.1, data)
     }
     /// Perform write operation on the given handle.
-    pub fn write(&self, data: CIterator<ROData>) -> Result<()> {
+    pub fn write(&self, data: VecOps<ROData>) -> Result<()> {
         self.0.write(self.1, data)
     }
     /// Perform remote procedure call on the given handle.
@@ -318,20 +318,56 @@ impl<'a, T> From<(&'a T, usize, Size)> for ObjCursor<'a, T> {
     }
 }
 
+fn single_io<T: core::ops::Deref<Target = [u8]>>(
+    func: impl Fn(VecOps<CTup2<u64, T>>) -> Result<()>,
+    off: u64,
+    buf: T,
+) -> Result<usize> {
+    let mut last_max = None;
+    let mut last_min = None;
+
+    let out = &mut |d: CTup2<u64, T>| {
+        let off = d.0 + d.1.len() as u64;
+        last_max = last_max.map(|r| core::cmp::max(off, r)).or(Some(off));
+        true
+    };
+    let out = &mut out.into();
+    let out = Some(out);
+
+    let out_fail = &mut |d: FailData<CTup2<u64, T>>| {
+        let (d, _) = d.into();
+        let off = d.0;
+        last_min = last_min.map(|r| core::cmp::min(off, r)).or(Some(off));
+        true
+    };
+    let out_fail = &mut out_fail.into();
+    let out_fail = Some(out_fail);
+
+    let buf_len = buf.len();
+
+    let inp = &mut core::iter::once(CTup2(off, buf));
+
+    let data = VecOps {
+        inp: inp.into(),
+        out,
+        out_fail,
+    };
+
+    func(data)
+        // If there was no error, and we did not receive any successful IO,
+        // maybe there is simply no feedback for successful IO? This is currently
+        // the case with memflow, thus this is sort of a hack until the API is there
+        // TODO: remove when memflow has matching callback interface.
+        .map(|_| last_max.unwrap_or(off + buf_len as u64))
+        .map(|maxio| core::cmp::min(last_min.unwrap_or(maxio), maxio))
+        .map(|lr| (lr - off) as usize)
+}
+
 impl<'a, T: Frontend> std::io::Read for ObjCursor<'a, T> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let read = self
-            .0
-            .read((&mut core::iter::once(CTup2(self.1, buf.into()))).into())
-            .map(|_| buf.len())
-            .or_else(|e| {
-                if e.1 == ErrorKind::OutOfBounds {
-                    Ok(0)
-                } else {
-                    Err(e)
-                }
-            })
+        let read = single_io(|data| self.0.read(data), self.1, buf.into())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.as_str()))?;
+
         self.1 += read as Size;
         Ok(read)
     }
@@ -339,18 +375,9 @@ impl<'a, T: Frontend> std::io::Read for ObjCursor<'a, T> {
 
 impl<'a, T: Frontend> std::io::Write for ObjCursor<'a, T> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let written = self
-            .0
-            .write((&mut core::iter::once(CTup2(self.1, buf.into()))).into())
-            .map(|_| buf.len())
-            .or_else(|e| {
-                if e.1 == ErrorKind::OutOfBounds {
-                    Ok(0)
-                } else {
-                    Err(e)
-                }
-            })
+        let written = single_io(|data| self.0.write(data), self.1, buf.into())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.as_str()))?;
+
         self.1 += written as Size;
         Ok(written)
     }

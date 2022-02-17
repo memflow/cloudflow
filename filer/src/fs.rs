@@ -9,6 +9,7 @@ use cglue::prelude::v1::*;
 use cglue::result::from_int_result_empty;
 pub use cglue::slice::CSliceMut;
 use cglue::trait_group::c_void;
+use core::num::NonZeroI32;
 
 /// Safely wrap fallible functions to return a integer result value.
 ///
@@ -71,12 +72,13 @@ pub trait Branch {
 pub trait Leaf {
     fn open(&self) -> Result<FileOpsObj<c_void>>;
 }
+
 #[repr(C)]
 #[derive(Clone, StableAbi)]
 pub struct FileOpsObj<T: 'static> {
     obj: CArcSome<T>,
-    read: Option<for<'a> extern "C" fn(&'a T, data: CIterator<RWData>) -> i32>,
-    write: Option<for<'a> extern "C" fn(&'a T, data: CIterator<ROData>) -> i32>,
+    read: Option<for<'a> extern "C" fn(&T, data: VecOps<RWData>) -> i32>,
+    write: Option<for<'a> extern "C" fn(&T, data: VecOps<ROData>) -> i32>,
     rpc: Option<
         for<'a> extern "C" fn(&'a T, input: CSliceRef<'a, u8>, output: CSliceMut<'a, u8>) -> i32,
     >,
@@ -85,8 +87,8 @@ pub struct FileOpsObj<T: 'static> {
 impl<T> FileOpsObj<T> {
     pub fn new(
         obj: CArcSome<T>,
-        read: Option<for<'a> extern "C" fn(&'a T, data: CIterator<RWData>) -> i32>,
-        write: Option<for<'a> extern "C" fn(&'a T, data: CIterator<ROData>) -> i32>,
+        read: Option<for<'a> extern "C" fn(&T, data: VecOps<RWData>) -> i32>,
+        write: Option<for<'a> extern "C" fn(&T, data: VecOps<ROData>) -> i32>,
         rpc: Option<
             for<'a> extern "C" fn(
                 &'a T,
@@ -104,7 +106,7 @@ impl<T> FileOpsObj<T> {
         .into_opaque()
     }
 
-    pub fn read(&self, data: CIterator<RWData>) -> Result<()> {
+    pub fn read<'a>(&self, data: VecOps<RWData>) -> Result<()> {
         from_int_result_empty((self
             .read
             .ok_or(Error(ErrorOrigin::Read, ErrorKind::NotImplemented))?)(
@@ -112,7 +114,7 @@ impl<T> FileOpsObj<T> {
         ))
     }
 
-    pub fn write(&self, data: CIterator<ROData>) -> Result<()> {
+    pub fn write<'a>(&self, data: VecOps<ROData>) -> Result<()> {
         from_int_result_empty((self
             .write
             .ok_or(Error(ErrorOrigin::Write, ErrorKind::NotImplemented))?)(
@@ -162,19 +164,37 @@ impl<C, D: AsRef<[u8]>> FnFile<C, D> {
         }
     }
 
-    extern "C" fn read(&self, data: CIterator<RWData>) -> i32 {
+    extern "C" fn read<'a>(&self, mut data: VecOps<RWData<'a>>) -> i32 {
         int_res_wrap! {
             let file = self.data.get_or_try_init(|| (self.func)(&self.ctx))?;
             let file: &[u8] = file.as_ref();
 
-            for CTup2(off, mut to) in data {
-                if off >= file.len() as _ {
-                    return Err(ErrorKind::OutOfBounds.into());
-                }
-
+            for CTup2(off, to) in data.inp {
                 let maps = &file[std::cmp::min(off as usize, file.len())..];
                 let min_len = std::cmp::min(maps.len(), to.len());
-                to[..min_len].copy_from_slice(&maps[..min_len]);
+                let to: &'a mut [u8] = to.into();
+                let (to, to_reject) = to.split_at_mut(min_len);
+                to.copy_from_slice(&maps[..min_len]);
+
+                let mut cont = false;
+
+                if !to.is_empty() {
+                    cont = opt_call(&mut data.out, CTup2(off, to.into()));
+                }
+                if !to_reject.is_empty() {
+                    cont = opt_call(
+                        &mut data.out_fail,
+                        (
+                            CTup2(off + min_len as u64, to_reject.into()),
+                            Error(ErrorOrigin::Read, ErrorKind::OutOfBounds),
+                        )
+                            .into(),
+                    ) || cont;
+                }
+
+                if !cont {
+                    return Err(Error(ErrorOrigin::Read, ErrorKind::Unknown));
+                }
             }
 
             Ok(())

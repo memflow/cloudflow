@@ -36,6 +36,28 @@ pub fn memdata_map<A: Into<memflow::types::Address>, B>(
     iter.map(|CTup2(a, b)| MemData(a.into(), b))
 }
 
+pub fn memdata_unmap<'a, B>(
+    mut callback: Option<&'a mut OpaqueCallback<'a, FailData<CTup2<u64, B>>>>,
+) -> impl FnMut(MemData<Address, B>) -> bool + 'a {
+    move |MemData(a, b)| {
+        callback
+            .as_mut()
+            .map(|cb| {
+                cb.call(
+                    (
+                        CTup2(a.to_umem() as u64, b),
+                        filer::error::Error(
+                            filer::error::ErrorOrigin::Other,
+                            filer::error::ErrorKind::Unknown,
+                        ),
+                    )
+                        .into(),
+                )
+            })
+            .unwrap_or(true)
+    }
+}
+
 pub extern "C" fn self_as_leaf<T: Leaf + Into<LeafBaseBox<'static, T>> + Clone + 'static>(
     obj: &T,
 ) -> COption<LeafBox<'static>> {

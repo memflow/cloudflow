@@ -47,15 +47,15 @@ struct NewHandler<T: 'static, C: 'static>(
 );
 
 impl<T, C> NewHandler<T, C> {
-    extern "C" fn write(&self, data: CIterator<ROData>) -> i32 {
-        for CTup2(_, d) in data {
-            if let Err(e) = std::str::from_utf8(&d)
+    extern "C" fn write(&self, mut data: VecOps<ROData>) -> i32 {
+        for d in data.inp {
+            if let Err(e) = std::str::from_utf8(&d.1)
                 .map_err(|_| Error(ErrorOrigin::Backend, ErrorKind::InvalidArgument))
                 .map(|a| a.split_once(" ").unwrap_or((a, "")))
                 .and_then(|(n, a)| (self.2)(a, &self.1).map(|o| (n, o)))
                 .and_then(|(n, o)| map_checked_insert(&*self.0, n, o))
             {
-                return e.into_int_err().into();
+                let _ = opt_call(&mut data.out_fail, (d, e).into());
             }
         }
         0
@@ -65,13 +65,13 @@ impl<T, C> NewHandler<T, C> {
 struct RmHandler<T: 'static>(CArcSome<DashMap<String, T>>);
 
 impl<T> RmHandler<T> {
-    extern "C" fn write(&self, data: CIterator<ROData>) -> i32 {
-        for CTup2(_, d) in data {
-            if let Err(e) = std::str::from_utf8(&d)
+    extern "C" fn write(&self, mut data: VecOps<ROData>) -> i32 {
+        for d in data.inp {
+            if let Err(e) = std::str::from_utf8(&d.1)
                 .map_err(|_| Error(ErrorOrigin::Backend, ErrorKind::InvalidArgument))
                 .map(|n| self.0.remove(n))
             {
-                return e.into_int_err().into();
+                let _ = opt_call(&mut data.out_fail, (d, e).into());
             }
         }
         0
@@ -194,14 +194,14 @@ impl<T, C> LocalBackend<T, C> {
 }
 
 impl<T: Branch, C> Backend for LocalBackend<T, C> {
-    fn read(&self, stack: BackendStack, handle: usize, data: CIterator<RWData>) -> Result<()> {
+    fn read(&self, stack: BackendStack, handle: usize, data: VecOps<RWData>) -> Result<()> {
         match self.handle_objs.get(handle) {
             Some(f) => f.read(data),
             _ => Err(Error(ErrorOrigin::Backend, ErrorKind::NotFound)),
         }
     }
 
-    fn write(&self, stack: BackendStack, handle: usize, data: CIterator<ROData>) -> Result<()> {
+    fn write(&self, stack: BackendStack, handle: usize, data: VecOps<ROData>) -> Result<()> {
         match self.handle_objs.get(handle) {
             Some(f) => f.write(data),
             _ => Err(Error(ErrorOrigin::Backend, ErrorKind::NotFound)),
@@ -311,9 +311,9 @@ where
 #[int_result]
 pub trait Backend {
     /// Perform read operation on the given handle
-    fn read(&self, stack: BackendStack, handle: usize, data: CIterator<RWData>) -> Result<()>;
+    fn read(&self, stack: BackendStack, handle: usize, data: VecOps<RWData>) -> Result<()>;
     /// Perform write operation on the given handle.
-    fn write(&self, stack: BackendStack, handle: usize, data: CIterator<ROData>) -> Result<()>;
+    fn write(&self, stack: BackendStack, handle: usize, data: VecOps<ROData>) -> Result<()>;
     /// Perform remote procedure call on the given handle.
     fn rpc(
         &self,

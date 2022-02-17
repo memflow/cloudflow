@@ -290,15 +290,14 @@ fn main() -> Result<()> {
         "os/native/processes/by-name/memflow-node/maps",
         "os/win/processes/by-name/lsass.exe/phys_maps",
     ] {
+        println!("OPEN {}", path);
         let maps_handle = node.open_cursor(path)?;
 
         let maps_handle = std::io::BufReader::new(maps_handle);
 
         use std::io::BufRead;
 
-        for line in maps_handle.lines() {
-            println!("{}", line?);
-        }
+        println!("Lines: {}", maps_handle.lines().count());
     }
 
     Ok(())
