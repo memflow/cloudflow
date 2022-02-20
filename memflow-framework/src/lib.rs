@@ -4,7 +4,6 @@ extern crate filer;
 pub use cglue::slice::CSliceMut;
 use connector::ThreadedConnectorArc;
 use filer::prelude::v1::*;
-pub use memflow::mem::MemData;
 use memflow::prelude::v1::*;
 use os::OsRoot;
 use std::sync::Arc;

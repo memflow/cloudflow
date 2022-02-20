@@ -179,11 +179,11 @@ impl<C, D: AsRef<[u8]>> FnFile<C, D> {
                 let mut cont = false;
 
                 if !to.is_empty() {
-                    cont = opt_call(&mut data.out, CTup2(off, to.into()));
+                    cont = opt_call(data.out.as_deref_mut(), CTup2(off, to.into()));
                 }
                 if !to_reject.is_empty() {
                     cont = opt_call(
-                        &mut data.out_fail,
+                        data.out_fail.as_deref_mut(),
                         (
                             CTup2(off + min_len as u64, to_reject.into()),
                             Error(ErrorOrigin::Read, ErrorKind::OutOfBounds),

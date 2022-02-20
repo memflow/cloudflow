@@ -55,7 +55,7 @@ impl<T, C> NewHandler<T, C> {
                 .and_then(|(n, a)| (self.2)(a, &self.1).map(|o| (n, o)))
                 .and_then(|(n, o)| map_checked_insert(&*self.0, n, o))
             {
-                let _ = opt_call(&mut data.out_fail, (d, e).into());
+                let _ = opt_call(data.out_fail.as_deref_mut(), (d, e).into());
             }
         }
         0
@@ -71,7 +71,7 @@ impl<T> RmHandler<T> {
                 .map_err(|_| Error(ErrorOrigin::Backend, ErrorKind::InvalidArgument))
                 .map(|n| self.0.remove(n))
             {
-                let _ = opt_call(&mut data.out_fail, (d, e).into());
+                let _ = opt_call(data.out_fail.as_deref_mut(), (d, e).into());
             }
         }
         0

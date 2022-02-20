@@ -3,22 +3,6 @@ use abi_stable::StableAbi;
 use cglue::prelude::v1::*;
 use core::num::NonZeroI32;
 
-#[derive(StableAbi, Debug, Clone, Copy)]
-#[repr(C)]
-pub struct CTup2<A, B>(pub A, pub B);
-
-impl<A, B> From<(A, B)> for CTup2<A, B> {
-    fn from((a, b): (A, B)) -> Self {
-        Self(a, b)
-    }
-}
-
-impl<A, B> From<CTup2<A, B>> for (A, B) {
-    fn from(CTup2(a, b): CTup2<A, B>) -> Self {
-        (a, b)
-    }
-}
-
 pub type Size = u64;
 
 pub type RWData<'a> = CTup2<Size, CSliceMut<'a, u8>>;
@@ -36,7 +20,7 @@ impl<T> From<(T, Error)> for FailData<T> {
 
 impl<T> From<FailData<T>> for (T, Error) {
     fn from(FailData(d, e): FailData<T>) -> Self {
-        (d, unsafe { Error::from_int_err(e) })
+        (d, Error::from_int_err(e))
     }
 }
 
@@ -66,8 +50,8 @@ impl<'a, T, I: Into<CIterator<'a, T>>> From<I> for VecOps<'a, T> {
     }
 }
 
-pub fn opt_call<T>(cb: &mut Option<&mut OpaqueCallback<T>>, data: T) -> bool {
-    cb.as_mut().map(|cb| cb.call(data)).unwrap_or(true)
+pub fn opt_call<T>(cb: Option<&mut OpaqueCallback<T>>, data: T) -> bool {
+    cb.map(|cb| cb.call(data)).unwrap_or(true)
 }
 
 pub trait ArcType: Sized + 'static {

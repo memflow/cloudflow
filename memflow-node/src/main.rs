@@ -106,13 +106,14 @@ fn rwtest2(
 
                 for (buf, addr) in bufs.iter_mut() {
                     *addr = base_addr + rng.gen_range(0..0x1000);
-                    read_data.push(MemData(Address::from(*addr), buf.as_mut_slice().into()));
+                    read_data.push(CTup2(
+                        Address::from(*addr),
+                        CSliceMut::from(buf.as_mut_slice()),
+                    ));
                 }
 
-                let mut iter = read_data.into_iter();
-
                 let now = Instant::now();
-                mem.read_raw_iter((&mut iter).into(), &mut (&mut |_| true).into())
+                mem.read_iter(read_data.into_iter(), None, None)
                     .expect("Failure");
                 total_dur += now.elapsed();
                 done_size += *i * *o;

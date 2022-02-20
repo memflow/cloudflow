@@ -7,7 +7,6 @@ use cglue::trait_group::c_void;
 use dashmap::DashMap;
 use filer::branch;
 use filer::prelude::v1::{Error, ErrorKind, ErrorOrigin, Result, *};
-pub use memflow::mem::MemData;
 use memflow::prelude::v1::*;
 use num::Num;
 
@@ -117,26 +116,23 @@ impl StrBuild<CArc<Arc<MemflowBackend>>> for OsRoot {
 impl ThreadedOs {
     extern "C" fn read(&self, data: VecOps<RWData>) -> i32 {
         int_res_wrap! {
-            as_mut!(self.get() impl MemoryView)
-                .ok_or(Error(ErrorOrigin::Read, ErrorKind::NotImplemented))?
-                .read_raw_iter(
-                    (&mut memdata_map(data.inp)).into(),
-                    &mut (&mut memdata_unmap(data.out_fail)).into(),
-                )
-                .map_err(|_| Error(ErrorOrigin::Read, ErrorKind::Unknown))
+            memdata_map(data, |data| {
+                as_mut!(self.get() impl MemoryView)
+                    .ok_or(Error(ErrorOrigin::Read, ErrorKind::NotImplemented))?
+                    .read_raw_iter(data)
+                    .map_err(|_| Error(ErrorOrigin::Read, ErrorKind::Unknown))
+            })
         }
     }
 
     extern "C" fn write(&self, data: VecOps<ROData>) -> i32 {
         int_res_wrap! {
-            as_mut!(self
-                .get() impl MemoryView)
-                .ok_or(Error(ErrorOrigin::Read, ErrorKind::NotImplemented))?
-                .write_raw_iter(
-                    (&mut memdata_map(data.inp)).into(),
-                    &mut (&mut memdata_unmap(data.out_fail)).into(),
-                )
-                .map_err(|_| Error(ErrorOrigin::Write, ErrorKind::Unknown))
+            memdata_map(data, |data| {
+                as_mut!(self.get() impl MemoryView)
+                    .ok_or(Error(ErrorOrigin::Write, ErrorKind::NotImplemented))?
+                    .write_raw_iter(data)
+                    .map_err(|_| Error(ErrorOrigin::Write, ErrorKind::Unknown))
+            })
         }
     }
 

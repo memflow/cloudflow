@@ -5,7 +5,6 @@ pub use cglue::slice::CSliceMut;
 use cglue::trait_group::c_void;
 use filer::branch;
 use filer::prelude::v1::{Error, ErrorKind, ErrorOrigin, Result, *};
-pub use memflow::mem::MemData;
 use memflow::prelude::v1::*;
 
 use once_cell::sync::OnceCell;
@@ -61,23 +60,21 @@ impl Leaf for LazyProcessArc {
 impl ThreadedProcess {
     extern "C" fn read(&self, data: VecOps<RWData>) -> i32 {
         int_res_wrap! {
-            self.get()
-                .read_raw_iter(
-                    (&mut memdata_map(data.inp)).into(),
-                    &mut (&mut memdata_unmap(data.out_fail)).into(),
-                )
-                .map_err(|_| Error(ErrorOrigin::Read, ErrorKind::Unknown))
+            memdata_map(data, |data| {
+                self.get()
+                    .read_raw_iter(data)
+                    .map_err(|_| Error(ErrorOrigin::Read, ErrorKind::Unknown))
+            })
         }
     }
 
     extern "C" fn write(&self, data: VecOps<ROData>) -> i32 {
         int_res_wrap! {
-            self.get()
-                .write_raw_iter(
-                    (&mut memdata_map(data.inp)).into(),
-                    &mut (&mut memdata_unmap(data.out_fail)).into(),
-                )
-                .map_err(|_| Error(ErrorOrigin::Write, ErrorKind::Unknown))
+            memdata_map(data, |data| {
+                self.get()
+                    .write_raw_iter(data)
+                    .map_err(|_| Error(ErrorOrigin::Write, ErrorKind::Unknown))
+            })
         }
     }
 
@@ -124,6 +121,22 @@ impl LazyProcessBase {
     }
 }
 
+fn format_perms(page_type: PageType) -> String {
+    format!(
+        "r{}{}",
+        if page_type.contains(PageType::WRITEABLE) {
+            'w'
+        } else {
+            '-'
+        },
+        if !page_type.contains(PageType::NOEXEC) {
+            'x'
+        } else {
+            '-'
+        }
+    )
+}
+
 extern "C" fn map_into_maps(proc: &LazyProcessArc) -> COption<LeafBox<'static>> {
     let file = FnFile::new(proc.clone(), |proc| {
         let proc = proc.proc().ok_or(ErrorKind::Uninitialized)?;
@@ -135,27 +148,12 @@ extern "C" fn map_into_maps(proc: &LazyProcessArc) -> COption<LeafBox<'static>> 
 
         let out = maps
             .into_iter()
-            .map(|MemData(vaddr, size)| {
+            .map(|CTup3(vaddr, size, page_type)| {
                 let module = modules
                     .iter()
                     .find(|m| m.base <= vaddr && m.base + m.size > vaddr);
 
-                /*let perms = format!(
-                    "r{}{}",
-                    if paddr.page_type().contains(PageType::WRITEABLE) {
-                        'w'
-                    } else {
-                        '-'
-                    },
-                    if !paddr.page_type().contains(PageType::NOEXEC) {
-                        'x'
-                    } else {
-                        '-'
-                    }
-                );*/
-
-                // TODO: Add perms to memflow
-                let perms = "r??";
+                let perms = format_perms(page_type);
 
                 format!(
                     "{:x}-{:x} {} {}\n",
@@ -194,19 +192,7 @@ extern "C" fn map_into_phys_maps(proc: &LazyProcessArc) -> COption<LeafBox<'stat
                         .iter()
                         .find(|m| m.base <= tr.in_virtual && m.base + m.size > tr.in_virtual);
 
-                    let perms = format!(
-                        "r{}{}",
-                        if tr.out_physical.page_type().contains(PageType::WRITEABLE) {
-                            'w'
-                        } else {
-                            '-'
-                        },
-                        if !tr.out_physical.page_type().contains(PageType::NOEXEC) {
-                            'x'
-                        } else {
-                            '-'
-                        }
-                    );
+                    let perms = format_perms(tr.out_physical.page_type());
 
                     format!(
                         "{:x}-{:x} {} {:9x} {}\n",
