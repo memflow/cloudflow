@@ -14,5 +14,6 @@ rand_xorshift = "0.3"
 memflow = "^0.2.0-beta"
 filer = { version = "0.1", path = "../filer" }
 filer-fuse = { version = "0.1", path = "../filer-fuse" }
+platflow-minidump = { version = "0.1", path = "../platflow-minidump" }
 simplelog = "^0.11.1"
 log = "0.4"

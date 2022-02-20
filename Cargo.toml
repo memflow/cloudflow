@@ -16,6 +16,7 @@ members = [
     "memflow-node",
 	"filer",
 	"filer-fuse",
+	"platflow-minidump"
 ]
 default-members = [
     "memflow-daemon",
@@ -26,4 +27,5 @@ default-members = [
     "memflow-node",
 	"filer",
 	"filer-fuse",
+	"platflow-minidump"
 ]

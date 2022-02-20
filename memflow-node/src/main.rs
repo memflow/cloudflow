@@ -228,6 +228,9 @@ fn main() -> Result<()> {
 
     let node = create_node();
 
+    // Add custom plugin
+    platflow_minidump::on_node(&node);
+
     println!("Create connectors");
 
     let mut os_new = node.open_cursor("os/new")?;
