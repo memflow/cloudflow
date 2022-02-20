@@ -20,6 +20,12 @@ pub struct ListEntry {
     pub is_branch: bool,
 }
 
+impl ListEntry {
+    pub fn new(name: ReprCString, is_branch: bool) -> Self {
+        Self { name, is_branch }
+    }
+}
+
 fn map_exists<T>(entries: &DashMap<String, T>, name: &str) -> bool {
     ["new", "rm"].contains(&name) || entries.contains_key(name)
 }
@@ -242,6 +248,37 @@ impl<T: Branch, C> Backend for LocalBackend<T, C> {
         }
     }
 
+    /// Get metadata of given path.
+    fn metadata(
+        &self,
+        stack: BackendStack,
+        path: &str,
+        plugins: &CPluginStore,
+    ) -> Result<NodeMetadata> {
+        let (branch, path) = path.split_once("/").unwrap_or((path, ""));
+
+        if path.is_empty() && branch == "new" {
+            self.new_handle.map(|_| NodeMetadata::default())
+        } else if path.is_empty() && branch == "rm" {
+            self.rm_handle.map(|_| NodeMetadata::default())
+        } else {
+            match self.entries.get(branch) {
+                Some(b) => {
+                    if path.is_empty() {
+                        Ok(NodeMetadata::branch())
+                    } else {
+                        match b.get_entry(path, plugins) {
+                            Ok(DirEntry::Leaf(leaf)) => leaf.metadata(),
+                            Ok(DirEntry::Branch(_)) => Ok(NodeMetadata::branch()),
+                            Err(e) => Err(e),
+                        }
+                    }
+                }
+                _ => Err(Error(ErrorOrigin::Backend, ErrorKind::NotFound)),
+            }
+        }
+    }
+
     fn list(
         &self,
         stack: BackendStack,
@@ -324,6 +361,13 @@ pub trait Backend {
     ) -> Result<()>;
     /// Open a leaf at the given path. The result is a handle.
     fn open(&self, stack: BackendStack, path: &str, plugins: &CPluginStore) -> Result<usize>;
+    /// Get metadata of given path.
+    fn metadata(
+        &self,
+        stack: BackendStack,
+        path: &str,
+        plugins: &CPluginStore,
+    ) -> Result<NodeMetadata>;
     /// List entries in the given path. It is a (name, is_branch) pair.
     fn list(
         &self,

@@ -47,6 +47,17 @@ impl Leaf for ThreadedConnectorArc {
             Some(ThreadedConnector::rpc),
         ))
     }
+
+    fn metadata(&self) -> Result<NodeMetadata> {
+        Ok(NodeMetadata {
+            is_branch: false,
+            has_read: true,
+            has_write: true,
+            has_rpc: true,
+            size: self.get_orig().metadata().max_address.to_umem() as Size,
+            ..Default::default()
+        })
+    }
 }
 
 impl StrBuild<CArc<Arc<MemflowBackend>>> for ThreadedConnectorArc {

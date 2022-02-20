@@ -19,12 +19,6 @@ pub enum HandleMap {
     Object(FileOpsObj<c_void>),
 }
 
-impl ListEntry {
-    pub fn new(name: ReprCString, is_branch: bool) -> Self {
-        Self { name, is_branch }
-    }
-}
-
 #[repr(C)]
 #[derive(StableAbi)]
 pub struct Node {
@@ -58,6 +52,10 @@ impl Frontend for CArcSome<Node> {
     /// Open a leaf at the given path. The result is a handle.
     fn open(&self, path: &str) -> Result<usize> {
         self.backend.open(self.into(), path, &self.plugins)
+    }
+    /// Get metadata of given path.
+    fn metadata(&self, path: &str) -> Result<NodeMetadata> {
+        self.backend.metadata(self.into(), path, &self.plugins)
     }
     /// List entries in the given path. It is a (name, is_branch) pair.
     fn list(&self, path: &str, out: &mut OpaqueCallback<ListEntry>) -> Result<()> {
@@ -109,6 +107,15 @@ impl<T: Backend> Backend for std::sync::Arc<T> {
         (**self).open(stack, path, plugins)
     }
 
+    fn metadata(
+        &self,
+        stack: BackendStack,
+        path: &str,
+        plugins: &CPluginStore,
+    ) -> Result<NodeMetadata> {
+        (**self).metadata(stack, path, plugins)
+    }
+
     fn list(
         &self,
         stack: BackendStack,
@@ -141,6 +148,15 @@ impl<T: Backend> Backend for CArcSome<T> {
 
     fn open(&self, stack: BackendStack, path: &str, plugins: &CPluginStore) -> Result<usize> {
         (**self).open(stack, path, plugins)
+    }
+
+    fn metadata(
+        &self,
+        stack: BackendStack,
+        path: &str,
+        plugins: &CPluginStore,
+    ) -> Result<NodeMetadata> {
+        (**self).metadata(stack, path, plugins)
     }
 
     fn list(
@@ -219,6 +235,31 @@ impl Backend for NodeBackend {
         Err(Error(ErrorOrigin::Node, ErrorKind::NotFound))
     }
 
+    fn metadata(
+        &self,
+        stack: BackendStack,
+        path: &str,
+        plugins: &CPluginStore,
+    ) -> Result<NodeMetadata> {
+        if let Some((backend, path)) = path.split_once("/") {
+            if let Some((_, backend)) = self
+                .backend_map
+                .get(backend)
+                .and_then(|idx| self.backends.get(*idx).map(|b| (*idx, b)))
+            {
+                backend.metadata((&stack, self).into(), path, plugins)
+            } else {
+                Err(Error(ErrorOrigin::Node, ErrorKind::NotFound))
+            }
+        } else {
+            if path.is_empty() || self.backend_map.get(path).is_some() {
+                Ok(NodeMetadata::branch())
+            } else {
+                Err(Error(ErrorOrigin::Node, ErrorKind::NotFound))
+            }
+        }
+    }
+
     fn list(
         &self,
         stack: BackendStack,
@@ -261,6 +302,8 @@ pub trait Frontend {
     fn rpc(&self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()>;
     /// Open a leaf at the given path. The result is a handle.
     fn open(&self, path: &str) -> Result<usize>;
+    /// Get metadata of given path.
+    fn metadata(&self, path: &str) -> Result<NodeMetadata>;
     /// List entries in the given path. It is a (name, is_branch) pair.
     fn list(&self, path: &str, out: &mut OpaqueCallback<ListEntry>) -> Result<()>;
 

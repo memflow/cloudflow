@@ -286,12 +286,24 @@ fn main() -> Result<()> {
         &[32, 8, 1],
         0x0010_0000,
     );*/
+    for path in &[
+        "os/native/processes/by-name/memflow-node/maps",
+        "os/native/processes/by-name/memflow-node",
+        "os/native/processes/by-name",
+        "os/native/processes",
+        "os/native",
+        "os",
+        "",
+    ] {
+        println!("META {}", path);
+        println!("OPEN {} {:?}", path, node.metadata(path)?);
+    }
 
     for path in &[
         "os/native/processes/by-name/memflow-node/maps",
         "os/win/processes/by-name/lsass.exe/phys_maps",
     ] {
-        println!("OPEN {}", path);
+        println!("OPEN {} {:?}", path, node.metadata(path)?);
         let maps_handle = node.open_cursor(path)?;
 
         let maps_handle = std::io::BufReader::new(maps_handle);
@@ -301,5 +313,7 @@ fn main() -> Result<()> {
         println!("Lines: {}", maps_handle.lines().count());
     }
 
-    Ok(())
+    filer_fuse::mount(node, "/tmp/memflow", 1000, 1000)?;
+
+    loop {}
 }

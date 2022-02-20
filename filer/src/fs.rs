@@ -2,6 +2,7 @@
 
 use crate::error::*;
 use crate::plugin_store::*;
+use crate::types::NodeMetadata;
 
 use crate::types::*;
 use abi_stable::StableAbi;
@@ -71,6 +72,7 @@ pub trait Branch {
 #[int_result]
 pub trait Leaf {
     fn open(&self) -> Result<FileOpsObj<c_void>>;
+    fn metadata(&self) -> Result<NodeMetadata>;
 }
 
 #[repr(C)]
@@ -152,6 +154,14 @@ impl<C: Clone + 'static, D: AsRef<[u8]> + Clone + 'static> Leaf for FnFile<C, D>
             None,
             None,
         ))
+    }
+
+    fn metadata(&self) -> Result<NodeMetadata> {
+        Ok(NodeMetadata {
+            is_branch: false,
+            has_read: true,
+            ..Default::default()
+        })
     }
 }
 

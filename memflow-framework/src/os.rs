@@ -81,6 +81,24 @@ impl Leaf for OsRoot {
             Some(ThreadedOs::rpc),
         ))
     }
+
+    fn metadata(&self) -> Result<NodeMetadata> {
+        Ok(NodeMetadata {
+            is_branch: false,
+            has_read: true,
+            has_write: true,
+            has_rpc: true,
+            size: (1 as Size)
+                << self
+                    .os
+                    .get_orig()
+                    .info()
+                    .arch
+                    .into_obj()
+                    .address_space_bits(),
+            ..Default::default()
+        })
+    }
 }
 
 impl StrBuild<CArc<Arc<MemflowBackend>>> for OsRoot {

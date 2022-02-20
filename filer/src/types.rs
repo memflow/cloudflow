@@ -79,3 +79,22 @@ pub trait ArcType: Sized + 'static {
         arc.into()
     }
 }
+
+#[derive(StableAbi, Default, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct NodeMetadata {
+    pub is_branch: bool,
+    pub has_read: bool,
+    pub has_write: bool,
+    pub has_rpc: bool,
+    pub size: Size,
+}
+
+impl NodeMetadata {
+    pub fn branch() -> Self {
+        Self {
+            is_branch: true,
+            ..Default::default()
+        }
+    }
+}

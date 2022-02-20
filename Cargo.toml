@@ -15,6 +15,7 @@ members = [
     "memflow-daemon-connector",
     "memflow-node",
 	"filer",
+	"filer-fuse",
 ]
 default-members = [
     "memflow-daemon",
@@ -24,4 +25,5 @@ default-members = [
     "memflow-daemon-connector",
     "memflow-node",
 	"filer",
+	"filer-fuse",
 ]

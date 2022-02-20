@@ -55,6 +55,18 @@ impl Leaf for LazyProcessArc {
             Some(ThreadedProcess::rpc),
         ))
     }
+
+    fn metadata(&self) -> Result<NodeMetadata> {
+        Ok(NodeMetadata {
+            is_branch: false,
+            has_read: true,
+            has_write: true,
+            has_rpc: true,
+            // TODO: Proc vs Sys arch?
+            size: (1 as Size) << self.proc_info.sys_arch.into_obj().address_space_bits(),
+            ..Default::default()
+        })
+    }
 }
 
 impl ThreadedProcess {
