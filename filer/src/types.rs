@@ -1,6 +1,7 @@
 use crate::error::Error;
 use abi_stable::StableAbi;
 use cglue::prelude::v1::*;
+use cglue::trait_group::c_void;
 use core::num::NonZeroI32;
 
 pub type Size = u64;
@@ -97,4 +98,8 @@ impl NodeMetadata {
             ..Default::default()
         }
     }
+}
+
+pub trait SetContext {
+    fn set_context(&mut self, ctx: &CArc<c_void>);
 }

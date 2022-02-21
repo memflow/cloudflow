@@ -1,4 +1,5 @@
-pub use cglue::slice::CSliceMut;
+use cglue::slice::CSliceMut;
+use cglue::trait_group::c_void;
 use filer::prelude::v1::{Error, ErrorKind, ErrorOrigin, Result, *};
 use memflow::prelude::v1::*;
 use memflow_framework::process::LazyProcessArc;
@@ -10,12 +11,15 @@ use minidump_writer::{
     },
 };
 
-pub extern "C" fn on_node(node: &Node) {
+pub extern "C" fn on_node(node: &Node, ctx: CArc<c_void>) {
     node.plugins
-        .register_mapping("mini.dmp", Mapping::Leaf(map_into_minidump));
+        .register_mapping("mini.dmp", Mapping::Leaf(map_into_minidump, ctx));
 }
 
-extern "C" fn map_into_minidump(proc: &LazyProcessArc) -> COption<LeafBox<'static>> {
+extern "C" fn map_into_minidump(
+    proc: &LazyProcessArc,
+    ctx: &CArc<c_void>,
+) -> COption<LeafArcBox<'static>> {
     let file = FnFile::new(proc.clone(), |proc| {
         let proc = proc.proc().ok_or(ErrorKind::Uninitialized)?;
         let mut proc = proc.get();
@@ -68,5 +72,5 @@ extern "C" fn map_into_minidump(proc: &LazyProcessArc) -> COption<LeafBox<'stati
         Ok(ret)
     });
 
-    COption::Some(trait_obj!(file as Leaf))
+    COption::Some(trait_obj!((file, ctx.clone()) as Leaf))
 }

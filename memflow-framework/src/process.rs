@@ -1,4 +1,4 @@
-use crate::os::ThreadedOsArc;
+use crate::os::OsBase;
 use crate::util::*;
 use abi_stable::StableAbi;
 pub use cglue::slice::CSliceMut;
@@ -9,15 +9,17 @@ use memflow::prelude::v1::*;
 
 use once_cell::sync::OnceCell;
 
-pub extern "C" fn on_node(node: &Node) {
-    node.plugins
-        .register_mapping("mem", Mapping::Leaf(self_as_leaf::<LazyProcessArc>));
+pub extern "C" fn on_node(node: &Node, ctx: CArc<c_void>) {
+    node.plugins.register_mapping(
+        "mem",
+        Mapping::Leaf(self_as_leaf::<LazyProcessArc>, ctx.clone()),
+    );
 
     node.plugins
-        .register_mapping("maps", Mapping::Leaf(map_into_maps));
+        .register_mapping("maps", Mapping::Leaf(map_into_maps, ctx.clone()));
 
     node.plugins
-        .register_mapping("phys_maps", Mapping::Leaf(map_into_phys_maps));
+        .register_mapping("phys_maps", Mapping::Leaf(map_into_phys_maps, ctx));
 }
 
 thread_types!(
@@ -98,7 +100,7 @@ impl ThreadedProcess {
 #[repr(C)]
 #[derive(StableAbi, Clone)]
 pub struct LazyProcessBase {
-    os: ThreadedOsArc,
+    os: OsBase,
     proc_info: ProcessInfo,
     proc_box: CArcSome<c_void>,
     get_proc: unsafe extern "C" fn(&LazyProcessBase) -> Option<&ThreadedProcessArc>,
@@ -123,7 +125,7 @@ impl LazyProcessBase {
         unsafe { (self.get_proc)(self) }
     }
 
-    pub fn new(os: ThreadedOsArc, proc_info: ProcessInfo) -> Self {
+    pub fn new(os: OsBase, proc_info: ProcessInfo) -> Self {
         Self {
             os,
             proc_info,
@@ -149,7 +151,10 @@ fn format_perms(page_type: PageType) -> String {
     )
 }
 
-extern "C" fn map_into_maps(proc: &LazyProcessArc) -> COption<LeafBox<'static>> {
+extern "C" fn map_into_maps(
+    proc: &LazyProcessArc,
+    ctx: &CArc<c_void>,
+) -> COption<LeafArcBox<'static>> {
     let file = FnFile::new(proc.clone(), |proc| {
         let proc = proc.proc().ok_or(ErrorKind::Uninitialized)?;
         let mut proc = proc.get();
@@ -179,10 +184,13 @@ extern "C" fn map_into_maps(proc: &LazyProcessArc) -> COption<LeafBox<'static>> 
 
         Ok(out)
     });
-    COption::Some(trait_obj!(file as Leaf))
+    COption::Some(trait_obj!((file, ctx.clone()) as Leaf))
 }
 
-extern "C" fn map_into_phys_maps(proc: &LazyProcessArc) -> COption<LeafBox<'static>> {
+extern "C" fn map_into_phys_maps(
+    proc: &LazyProcessArc,
+    ctx: &CArc<c_void>,
+) -> COption<LeafArcBox<'static>> {
     if proc
         .proc()
         .and_then(|proc| as_ref!(proc.get_orig() impl VirtualTranslate))
@@ -219,7 +227,7 @@ extern "C" fn map_into_phys_maps(proc: &LazyProcessArc) -> COption<LeafBox<'stat
 
             Ok(out)
         });
-        COption::Some(trait_obj!(file as Leaf))
+        COption::Some(trait_obj!((file, ctx.clone()) as Leaf))
     } else {
         COption::None
     }

@@ -2,6 +2,7 @@
 extern crate filer;
 
 pub use cglue::slice::CSliceMut;
+use cglue::trait_group::c_void;
 use connector::ThreadedConnectorArc;
 use filer::prelude::v1::*;
 use memflow::prelude::v1::*;
@@ -13,7 +14,7 @@ pub mod os;
 pub mod process;
 pub mod util;
 
-const BUILTIN_PLUGINS: &[extern "C" fn(&Node)] =
+const BUILTIN_PLUGINS: &[extern "C" fn(&Node, CArc<c_void>)] =
     &[os::on_node, process::on_node, connector::on_node];
 
 pub fn create_node() -> CArcSome<Node> {
@@ -24,7 +25,7 @@ pub fn create_node() -> CArcSome<Node> {
     let node = Node::new(backend);
 
     for plugin in BUILTIN_PLUGINS {
-        plugin(&node);
+        plugin(&node, Default::default());
     }
 
     node.into()

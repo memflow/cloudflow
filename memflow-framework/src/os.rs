@@ -12,24 +12,24 @@ use num::Num;
 
 use std::sync::Arc;
 
-pub extern "C" fn on_node(node: &Node) {
+pub extern "C" fn on_node(node: &Node, ctx: CArc<c_void>) {
     node.plugins
-        .register_mapping("os", Mapping::Leaf(self_as_leaf::<OsRoot>));
+        .register_mapping("os", Mapping::Leaf(self_as_leaf::<OsRoot>, ctx.clone()));
 
     node.plugins
-        .register_mapping("processes", Mapping::Branch(ProcessList::map_into));
+        .register_mapping("processes", Mapping::Branch(ProcessList::map_into, ctx));
 }
 
 thread_types!(OsInstanceArcBox<'static>, ThreadedOs, ThreadedOsArc);
 
 #[repr(C)]
 #[derive(Clone, StableAbi)]
-pub struct OsRoot {
+pub struct OsBase {
     os: ThreadedOsArc,
-    plist: CArcSome<c_void>,
+    ctx: CArc<c_void>,
 }
 
-impl core::ops::Deref for OsRoot {
+impl core::ops::Deref for OsBase {
     type Target = ThreadedOsArc;
 
     fn deref(&self) -> &Self::Target {
@@ -37,8 +37,23 @@ impl core::ops::Deref for OsRoot {
     }
 }
 
-impl From<ThreadedOsArc> for OsRoot {
-    fn from(os: ThreadedOsArc) -> Self {
+#[repr(C)]
+#[derive(Clone, StableAbi)]
+pub struct OsRoot {
+    os: OsBase,
+    plist: CArcSome<c_void>,
+}
+
+impl core::ops::Deref for OsRoot {
+    type Target = OsBase;
+
+    fn deref(&self) -> &Self::Target {
+        &self.os
+    }
+}
+
+impl From<OsBase> for OsRoot {
+    fn from(os: OsBase) -> Self {
         Self {
             plist: CArcSome::from(ProcessList::from(os.clone())).into_opaque(),
             os,
@@ -75,7 +90,7 @@ impl Branch for OsRoot {
 impl Leaf for OsRoot {
     fn open(&self) -> Result<FileOpsObj<c_void>> {
         Ok(FileOpsObj::new(
-            (*self.os).clone(),
+            (**self.os).clone(),
             Some(ThreadedOs::read),
             Some(ThreadedOs::write),
             Some(ThreadedOs::rpc),
@@ -126,6 +141,11 @@ impl StrBuild<CArc<Arc<MemflowBackend>>> for OsRoot {
                 Some(&str::parse(args).map_err(|_| ErrorKind::InvalidArgument)?),
             )
             .map(|c| ThreadedOs::from(c).self_arc_up())
+            // TODO: set ctx
+            .map(|c| OsBase {
+                os: c.into(),
+                ctx: Default::default(),
+            })
             .map(Self::from)
             .map_err(|_| ErrorKind::Uninitialized.into())
     }
@@ -161,14 +181,14 @@ impl ThreadedOs {
 
 #[derive(Clone)]
 struct ProcessList {
-    os: ThreadedOsArc,
+    os: OsBase,
     by_pid: PidProcessList,
     by_name: NameProcessList,
     by_pid_name: PidNameProcessList,
 }
 
-impl From<ThreadedOsArc> for ProcessList {
-    fn from(os: ThreadedOsArc) -> Self {
+impl From<OsBase> for ProcessList {
+    fn from(os: OsBase) -> Self {
         Self {
             by_pid: os.clone().into(),
             by_name: os.clone().into(),
@@ -179,8 +199,10 @@ impl From<ThreadedOsArc> for ProcessList {
 }
 
 impl ProcessList {
-    extern "C" fn map_into(os: &OsRoot) -> COption<BranchBox<'static>> {
-        COption::Some(trait_obj!(unsafe { &**os.plist() }.clone() as Branch))
+    extern "C" fn map_into(os: &OsRoot, ctx: &CArc<c_void>) -> COption<BranchArcBox<'static>> {
+        COption::Some(trait_obj!(
+            (unsafe { &**os.plist() }.clone(), ctx.clone()) as Branch
+        ))
     }
 }
 
@@ -189,9 +211,15 @@ impl Branch for ProcessList {
         let (entry, path) = branch::split_path(path);
 
         match entry {
-            "by-pid" => branch::forward_entry(self.by_pid.clone(), path, plugins),
-            "by-name" => branch::forward_entry(self.by_name.clone(), path, plugins),
-            "by-pid-name" => branch::forward_entry(self.by_pid_name.clone(), path, plugins),
+            "by-pid" => {
+                branch::forward_entry(self.by_pid.clone(), self.os.ctx.clone(), path, plugins)
+            }
+            "by-name" => {
+                branch::forward_entry(self.by_name.clone(), self.os.ctx.clone(), path, plugins)
+            }
+            "by-pid-name" => {
+                branch::forward_entry(self.by_pid_name.clone(), self.os.ctx.clone(), path, plugins)
+            }
             addr => {
                 let addr: umem =
                     Num::from_str_radix(addr, 16).map_err(|_| ErrorKind::InvalidPath)?;
@@ -204,7 +232,7 @@ impl Branch for ProcessList {
 
                 let proc = LazyProcessArc::from(LazyProcessBase::new(self.os.clone(), info));
 
-                branch::forward_entry(proc, path, plugins)
+                branch::forward_entry(proc, self.os.ctx.clone(), path, plugins)
             }
         }
     }
@@ -216,15 +244,21 @@ impl Branch for ProcessList {
     ) -> Result<()> {
         let _ = out.call(BranchListEntry::new(
             "by-pid".into(),
-            DirEntry::Branch(trait_obj!(self.by_pid.clone() as Branch)),
+            DirEntry::Branch(trait_obj!(
+                (self.by_pid.clone(), self.os.ctx.clone()) as Branch
+            )),
         ));
         let _ = out.call(BranchListEntry::new(
             "by-name".into(),
-            DirEntry::Branch(trait_obj!(self.by_name.clone() as Branch)),
+            DirEntry::Branch(trait_obj!(
+                (self.by_name.clone(), self.os.ctx.clone()) as Branch
+            )),
         ));
         let _ = out.call(BranchListEntry::new(
             "by-pid-name".into(),
-            DirEntry::Branch(trait_obj!(self.by_pid_name.clone() as Branch)),
+            DirEntry::Branch(trait_obj!(
+                (self.by_pid_name.clone(), self.os.ctx.clone()) as Branch
+            )),
         ));
 
         self.os
@@ -233,7 +267,7 @@ impl Branch for ProcessList {
                 (&mut |info: ProcessInfo| {
                     let addr = info.address.to_umem();
                     let proc = LazyProcessArc::from(LazyProcessBase::new(self.os.clone(), info));
-                    let entry = DirEntry::Branch(trait_obj!(proc as Branch));
+                    let entry = DirEntry::Branch(trait_obj!((proc, self.os.ctx.clone()) as Branch));
                     out.call(BranchListEntry::new(format!("{:x}", addr).into(), entry))
                 })
                     .into(),
@@ -246,12 +280,12 @@ impl Branch for ProcessList {
 
 #[derive(Clone)]
 struct PidProcessList {
-    os: ThreadedOsArc,
+    os: OsBase,
     pid_cache: CArcSome<DashMap<Pid, Address>>,
 }
 
-impl From<ThreadedOsArc> for PidProcessList {
-    fn from(os: ThreadedOsArc) -> Self {
+impl From<OsBase> for PidProcessList {
+    fn from(os: OsBase) -> Self {
         Self {
             os,
             pid_cache: DashMap::default().into(),
@@ -303,7 +337,9 @@ impl Branch for PidProcessList {
         if let Some(path) = path {
             proc.get_entry(path, plugins)
         } else {
-            Ok(DirEntry::Branch(trait_obj!(proc as Branch)))
+            Ok(DirEntry::Branch(trait_obj!(
+                (proc, self.os.ctx.clone()) as Branch
+            )))
         }
     }
 
@@ -317,7 +353,8 @@ impl Branch for PidProcessList {
                     if self.pid_cache.insert(pid, info.address).is_none() {
                         let proc =
                             LazyProcessArc::from(LazyProcessBase::new(self.os.clone(), info));
-                        let entry = DirEntry::Branch(trait_obj!(proc as Branch));
+                        let entry =
+                            DirEntry::Branch(trait_obj!((proc, self.os.ctx.clone()) as Branch));
                         out.call(BranchListEntry::new(format!("{}", pid).into(), entry))
                     } else {
                         true
@@ -333,12 +370,12 @@ impl Branch for PidProcessList {
 
 #[derive(Clone)]
 struct NameProcessList {
-    os: ThreadedOsArc,
+    os: OsBase,
     name_cache: CArcSome<DashMap<String, Address>>,
 }
 
-impl From<ThreadedOsArc> for NameProcessList {
-    fn from(os: ThreadedOsArc) -> Self {
+impl From<OsBase> for NameProcessList {
+    fn from(os: OsBase) -> Self {
         Self {
             os,
             name_cache: DashMap::default().into(),
@@ -388,7 +425,9 @@ impl Branch for NameProcessList {
         if let Some(path) = path {
             proc.get_entry(path, plugins)
         } else {
-            Ok(DirEntry::Branch(trait_obj!(proc as Branch)))
+            Ok(DirEntry::Branch(trait_obj!(
+                (proc, self.os.ctx.clone()) as Branch
+            )))
         }
     }
 
@@ -402,7 +441,8 @@ impl Branch for NameProcessList {
                     if self.name_cache.insert(name.clone(), info.address).is_none() {
                         let proc =
                             LazyProcessArc::from(LazyProcessBase::new(self.os.clone(), info));
-                        let entry = DirEntry::Branch(trait_obj!(proc as Branch));
+                        let entry =
+                            DirEntry::Branch(trait_obj!((proc, self.os.ctx.clone()) as Branch));
                         out.call(BranchListEntry::new(format!("{}", name).into(), entry))
                     } else {
                         true
@@ -418,12 +458,12 @@ impl Branch for NameProcessList {
 
 #[derive(Clone)]
 struct PidNameProcessList {
-    os: ThreadedOsArc,
+    os: OsBase,
     name_cache: CArcSome<DashMap<String, Address>>,
 }
 
-impl From<ThreadedOsArc> for PidNameProcessList {
-    fn from(os: ThreadedOsArc) -> Self {
+impl From<OsBase> for PidNameProcessList {
+    fn from(os: OsBase) -> Self {
         Self {
             os,
             name_cache: DashMap::default().into(),
@@ -487,7 +527,9 @@ impl Branch for PidNameProcessList {
         if let Some(path) = path {
             proc.get_entry(path, plugins)
         } else {
-            Ok(DirEntry::Branch(trait_obj!(proc as Branch)))
+            Ok(DirEntry::Branch(trait_obj!(
+                (proc, self.os.ctx.clone()) as Branch
+            )))
         }
     }
 
@@ -501,7 +543,8 @@ impl Branch for PidNameProcessList {
                     if self.name_cache.insert(name.clone(), info.address).is_none() {
                         let proc =
                             LazyProcessArc::from(LazyProcessBase::new(self.os.clone(), info));
-                        let entry = DirEntry::Branch(trait_obj!(proc as Branch));
+                        let entry =
+                            DirEntry::Branch(trait_obj!((proc, self.os.ctx.clone()) as Branch));
                         out.call(BranchListEntry::new(name.into(), entry))
                     } else {
                         true

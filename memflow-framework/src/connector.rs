@@ -9,9 +9,11 @@ use memflow::prelude::v1::*;
 
 use std::sync::Arc;
 
-pub extern "C" fn on_node(node: &Node) {
-    node.plugins
-        .register_mapping("mem", Mapping::Leaf(self_as_leaf::<ThreadedConnectorArc>));
+pub extern "C" fn on_node(node: &Node, ctx: CArc<c_void>) {
+    node.plugins.register_mapping(
+        "mem",
+        Mapping::Leaf(self_as_leaf::<ThreadedConnectorArc>, ctx),
+    );
 }
 
 thread_types!(

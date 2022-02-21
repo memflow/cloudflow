@@ -26,8 +26,8 @@ macro_rules! int_res_wrap {
 #[repr(C)]
 #[derive(StableAbi)]
 pub enum DirEntry {
-    Branch(BranchBox<'static>),
-    Leaf(LeafBox<'static>),
+    Branch(BranchArcBox<'static>),
+    Leaf(LeafArcBox<'static>),
 }
 
 #[repr(C)]
@@ -210,4 +210,13 @@ impl<C, D: AsRef<[u8]>> FnFile<C, D> {
             Ok(())
         }
     }
+}
+
+pub extern "C" fn self_as_leaf<
+    T: Leaf /* + Into<LeafBaseArcBox<'static, T, c_void>>*/ + Clone + 'static,
+>(
+    obj: &T,
+    ctx: &CArc<c_void>,
+) -> COption<LeafArcBox<'static>> {
+    COption::Some(trait_obj!((obj.clone(), ctx.clone()) as Leaf))
 }

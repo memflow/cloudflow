@@ -54,9 +54,3 @@ pub fn memdata_map<B, F: FnOnce(MemOps<CTup3<Address, Address, B>, CTup2<Address
     let mut out_fail = out_fail.as_mut().map(<_>::into);
     MemOps::with_raw(inp, out.as_mut(), out_fail.as_mut(), func)
 }
-
-pub extern "C" fn self_as_leaf<T: Leaf + Into<LeafBaseBox<'static, T>> + Clone + 'static>(
-    obj: &T,
-) -> COption<LeafBox<'static>> {
-    COption::Some(trait_obj!(obj.clone() as Leaf))
-}

@@ -11,26 +11,27 @@ use dashmap::mapref::entry;
 use dashmap::DashMap;
 use sharded_slab::{Entry, Slab};
 
-pub type MappingFunction<T, O> = extern "C" fn(&T) -> COption<O>;
+pub type MappingFunction<T, O> = extern "C" fn(&T, &CArc<c_void>) -> COption<O>;
 
 #[derive(StableAbi)]
 // TODO: Why does the func type not work??
 #[sabi(unsafe_opaque_fields)]
 #[repr(C)]
 pub enum Mapping<T: StableAbi> {
-    Branch(MappingFunction<T, BranchBox<'static>>), //BranchBox<'static>>),
-    Leaf(MappingFunction<T, LeafBox<'static>>),     //LeafBox<'static>>)
+    Branch(MappingFunction<T, BranchArcBox<'static>>, CArc<c_void>),
+    Leaf(MappingFunction<T, LeafArcBox<'static>>, CArc<c_void>),
 }
 
 unsafe impl<T: StableAbi> Opaquable for Mapping<T> {
     type OpaqueTarget = Mapping<c_void>;
 }
 
-impl<T: StableAbi> Copy for Mapping<T> {}
-
 impl<T: StableAbi> Clone for Mapping<T> {
     fn clone(&self) -> Self {
-        *self
+        match self {
+            Mapping::Branch(a, b) => Mapping::Branch(*a, b.clone()),
+            Mapping::Leaf(a, b) => Mapping::Leaf(*a, b.clone()),
+        }
     }
 }
 
@@ -91,7 +92,7 @@ impl From<PluginStore> for CPluginStore {
         ) -> COption<OpaqueMapping> {
             let store = store as *const _ as *const PluginStore;
             let entries = (*store).entries_raw(id, layout);
-            entries.get(name.into_str()).map(|e| *e).into()
+            entries.get(name.into_str()).map(|e| (*e).clone()).into()
         }
 
         unsafe extern "C" fn entry_list<'a>(
@@ -106,7 +107,7 @@ impl From<PluginStore> for CPluginStore {
                 .iter()
                 .take_while(|e| {
                     out.call(
-                        &CTup2(CSliceRef::from(e.key().as_str()), *e.value()) as *const _
+                        &CTup2(CSliceRef::from(e.key().as_str()), (*e.value()).clone()) as *const _
                             as *const c_void,
                     )
                 })

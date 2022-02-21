@@ -229,7 +229,7 @@ fn main() -> Result<()> {
     let node = create_node();
 
     // Add custom plugin
-    platflow_minidump::on_node(&node);
+    platflow_minidump::on_node(&node, Default::default());
 
     println!("Create connectors");
 
