@@ -1,5 +1,5 @@
 [package]
-name = "memflow-framework"
+name = "cloudflow"
 version = "0.1.0"
 edition = "2021"
 

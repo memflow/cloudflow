@@ -8,24 +8,16 @@ debug = true
 
 [workspace]
 members = [
-    "memflow-daemon",
-    "memflow-client",
-    "memflow-cli",
-    "memflow-framework",
-    "memflow-daemon-connector",
+	"cloudflow",
     "memflow-node",
 	"filer",
 	"filer-fuse",
-	"platflow-minidump"
+	"cloudflow-minidump"
 ]
 default-members = [
-    "memflow-daemon",
-    "memflow-client",
-    "memflow-cli",
-    "memflow-framework",
-    "memflow-daemon-connector",
+	"cloudflow",
     "memflow-node",
 	"filer",
 	"filer-fuse",
-	"platflow-minidump"
+	"cloudflow-minidump"
 ]

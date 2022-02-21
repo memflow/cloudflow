@@ -1,8 +1,8 @@
 use cglue::slice::CSliceMut;
 use cglue::trait_group::c_void;
+use cloudflow::process::LazyProcessArc;
 use filer::prelude::v1::{Error, ErrorKind, ErrorOrigin, Result, *};
 use memflow::prelude::v1::*;
-use memflow_framework::process::LazyProcessArc;
 
 use minidump_writer::{
     minidump::Minidump,

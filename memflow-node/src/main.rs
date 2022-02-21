@@ -1,7 +1,7 @@
 use anyhow::Result;
+use cloudflow::*;
 use filer::prelude::v1::*;
 use memflow::prelude::v1::{Address, *};
-use memflow_framework::*;
 use ptree::{print_tree, Style, TreeItem};
 use rand::{Rng, SeedableRng};
 use rand_xorshift::XorShiftRng as CurRng;
@@ -229,7 +229,7 @@ fn main() -> Result<()> {
     let node = create_node();
 
     // Add custom plugin
-    platflow_minidump::on_node(&node, Default::default());
+    cloudflow_minidump::on_node(&node, Default::default());
 
     println!("Create connectors");
 

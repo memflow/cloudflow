@@ -1,5 +1,5 @@
 [package]
-name = "platflow-minidump"
+name = "cloudflow-minidump"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,4 +11,4 @@ memflow = "^0.2.0-beta"
 abi_stable = "0.10"
 cglue = { version = ">=0.2.5", default-features = false, features = ["layout_checks"] }
 filer = { version = "0.1", path = "../filer" }
-memflow-framework = { version = "0.1", path = "../memflow-framework" }
+cloudflow = { version = "0.1", path = "../cloudflow" }

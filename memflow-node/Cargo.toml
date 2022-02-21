@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-memflow-framework = { path = "../memflow-framework" }
+cloudflow = { path = "../cloudflow" }
 anyhow = "1"
 ptree = "0.4"
 rand = "0.8"
@@ -14,6 +14,6 @@ rand_xorshift = "0.3"
 memflow = "^0.2.0-beta"
 filer = { version = "0.1", path = "../filer" }
 filer-fuse = { version = "0.1", path = "../filer-fuse" }
-platflow-minidump = { version = "0.1", path = "../platflow-minidump" }
+cloudflow-minidump = { version = "0.1", path = "../cloudflow-minidump" }
 simplelog = "^0.11.1"
 log = "0.4"
