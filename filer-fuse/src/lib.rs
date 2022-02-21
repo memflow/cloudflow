@@ -328,7 +328,7 @@ impl FilesystemMT for FilerFs {
     ) -> CallbackResult {
         // TODO: validate chunk size?
         let mut buf = vec![0; size as usize];
-        let mut cursor = ObjCursor::from((&self.node, fh as usize));
+        let mut cursor = ObjCursor::from((&self.node, fh as usize, false));
         // TODO: proper error checking
         match cursor.seek(SeekFrom::Start(offset)) {
             Ok(off) if offset == off => match cursor.read(&mut buf) {
@@ -361,7 +361,7 @@ impl FilesystemMT for FilerFs {
             return Err(libc::EIO);
         }
 
-        let mut cursor = ObjCursor::from((&self.node, fh as usize));
+        let mut cursor = ObjCursor::from((&self.node, fh as usize, false));
         // TODO: proper error checking
         // TODO: rw perms checking?
         match cursor.seek(SeekFrom::Start(offset)) {

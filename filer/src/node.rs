@@ -355,17 +355,19 @@ pub trait Frontend {
     }
 }
 
-pub struct ObjHandle<'a, T: Frontend>(&'a T, usize);
+pub struct ObjHandle<'a, T: Frontend>(&'a T, usize, bool);
 
 impl<'a, T: Frontend> From<(&'a T, usize)> for ObjHandle<'a, T> {
     fn from((a, b): (&'a T, usize)) -> Self {
-        Self(a, b)
+        Self(a, b, true)
     }
 }
 
 impl<'a, T: Frontend> Drop for ObjHandle<'a, T> {
     fn drop(&mut self) {
-        self.0.close(self.1);
+        if self.2 {
+            self.0.close(self.1);
+        }
     }
 }
 
@@ -388,13 +390,19 @@ pub struct ObjCursor<'a, T: Frontend>(ObjHandle<'a, T>, Size);
 
 impl<'a, T: Frontend> From<(&'a T, usize)> for ObjCursor<'a, T> {
     fn from((a, b): (&'a T, usize)) -> Self {
-        Self(ObjHandle(a, b), 0)
+        Self(ObjHandle(a, b, true), 0)
+    }
+}
+
+impl<'a, T: Frontend> From<(&'a T, usize, bool)> for ObjCursor<'a, T> {
+    fn from((a, b, c): (&'a T, usize, bool)) -> Self {
+        Self(ObjHandle(a, b, c), 0)
     }
 }
 
 impl<'a, T: Frontend> From<(&'a T, usize, Size)> for ObjCursor<'a, T> {
     fn from((a, b, c): (&'a T, usize, Size)) -> Self {
-        Self(ObjHandle(a, b), c)
+        Self(ObjHandle(a, b, true), c)
     }
 }
 

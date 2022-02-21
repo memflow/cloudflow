@@ -12,6 +12,7 @@ members = [
     "memflow-node",
 	"filer",
 	"filer-fuse",
+	"filer-tokio",
 	"cloudflow-minidump"
 ]
 default-members = [
@@ -19,5 +20,6 @@ default-members = [
     "memflow-node",
 	"filer",
 	"filer-fuse",
+	"filer-tokio",
 	"cloudflow-minidump"
 ]

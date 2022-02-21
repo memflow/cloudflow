@@ -74,6 +74,12 @@ impl From<ErrorKind> for Error {
     }
 }
 
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Self {
+        Error(ErrorOrigin::Io, ErrorKind::Unknown)
+    }
+}
+
 #[repr(u16)]
 #[non_exhaustive]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -85,6 +91,7 @@ pub enum ErrorOrigin {
     Read,
     Write,
     Rpc,
+    Io,
 
     Other,
 }
@@ -100,6 +107,7 @@ impl ErrorOrigin {
             ErrorOrigin::Read => "read",
             ErrorOrigin::Write => "write",
             ErrorOrigin::Rpc => "rpc",
+            ErrorOrigin::Io => "io",
             ErrorOrigin::Other => "other",
         }
     }

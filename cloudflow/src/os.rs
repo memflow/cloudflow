@@ -502,7 +502,10 @@ impl PidNameProcessList {
                 .process_info_by_pid(pid)
                 .map_err(|_| ErrorKind::NotFound.into())
                 .and_then(|i| {
-                    if &*i.name == name {
+                    let name2: &str = &*i.name;
+                    if (name2.len() <= name.len() && name.starts_with(name2))
+                        || name2.starts_with(name)
+                    {
                         Ok(i)
                     } else {
                         Err(ErrorKind::NotFound.into())
@@ -520,7 +523,9 @@ impl Branch for PidNameProcessList {
     fn get_entry(&self, path: &str, plugins: &CPluginStore) -> Result<DirEntry> {
         let (name, path) = branch::split_path(path);
 
+        println!("GI {}", name);
         let info = self.get_info(name)?;
+        println!("GOTI {}", name);
 
         let proc = LazyProcessArc::from(LazyProcessBase::new(self.os.clone(), info));
 
@@ -545,6 +550,7 @@ impl Branch for PidNameProcessList {
                             LazyProcessArc::from(LazyProcessBase::new(self.os.clone(), info));
                         let entry =
                             DirEntry::Branch(trait_obj!((proc, self.os.ctx.clone()) as Branch));
+                        println!("CALL {}", name);
                         out.call(BranchListEntry::new(name.into(), entry))
                     } else {
                         true
