@@ -49,6 +49,10 @@ impl Frontend for CArcSome<Node> {
     fn rpc(&self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()> {
         self.backend.rpc(self.into(), handle, input, output)
     }
+    /// Close an already open handle.
+    fn close(&self, handle: usize) -> Result<()> {
+        self.backend.close(self.into(), handle)
+    }
     /// Open a leaf at the given path. The result is a handle.
     fn open(&self, path: &str) -> Result<usize> {
         self.backend.open(self.into(), path, &self.plugins)
@@ -69,7 +73,7 @@ pub struct NodeBackend {
     /// Maps backend name to backend ID in the vec
     backend_map: DashMap<String, usize>,
     /// Maps handle to (backend, handle) pair.
-    handles: Slab<HandleMap>,
+    handles: RcSlab<HandleMap>,
 }
 
 impl NodeBackend {
@@ -101,6 +105,10 @@ impl<T: Backend> Backend for std::sync::Arc<T> {
         output: &mut [u8],
     ) -> Result<()> {
         (**self).rpc(stack, handle, input, output)
+    }
+
+    fn close(&self, stack: BackendStack, handle: usize) -> Result<()> {
+        (**self).close(stack, handle)
     }
 
     fn open(&self, stack: BackendStack, path: &str, plugins: &CPluginStore) -> Result<usize> {
@@ -146,6 +154,10 @@ impl<T: Backend> Backend for CArcSome<T> {
         (**self).rpc(stack, handle, input, output)
     }
 
+    fn close(&self, stack: BackendStack, handle: usize) -> Result<()> {
+        (**self).close(stack, handle)
+    }
+
     fn open(&self, stack: BackendStack, path: &str, plugins: &CPluginStore) -> Result<usize> {
         (**self).open(stack, path, plugins)
     }
@@ -172,7 +184,7 @@ impl<T: Backend> Backend for CArcSome<T> {
 
 impl Backend for NodeBackend {
     fn read(&self, stack: BackendStack, handle: usize, data: VecOps<RWData>) -> Result<()> {
-        match self.handles.get(handle).as_ref().map(|v| &**v) {
+        match self.handles.get(handle).as_deref() {
             Some(&HandleMap::Forward(backend, handle)) => {
                 if let Some(backend) = self.backends.get(backend) {
                     backend.read((&stack, self).into(), handle, data)
@@ -216,6 +228,23 @@ impl Backend for NodeBackend {
             }
             Some(HandleMap::Object(obj)) => obj.rpc(input, output),
             _ => Err(Error(ErrorOrigin::Node, ErrorKind::NotFound)),
+        }
+    }
+
+    fn close(&self, stack: BackendStack, handle: usize) -> Result<()> {
+        if let Some(r) = self.handles.dec_rc(handle) {
+            match r.as_deref() {
+                Some(&HandleMap::Forward(backend, handle)) => {
+                    if let Some(backend) = self.backends.get(backend) {
+                        backend.close((&stack, self).into(), handle)
+                    } else {
+                        Err(Error(ErrorOrigin::Node, ErrorKind::NotFound))
+                    }
+                }
+                _ => Ok(()),
+            }
+        } else {
+            Err(Error(ErrorOrigin::Node, ErrorKind::NotFound))
         }
     }
 
@@ -300,6 +329,8 @@ pub trait Frontend {
     fn write(&self, handle: usize, data: VecOps<ROData>) -> Result<()>;
     /// Perform remote procedure call on the given handle.
     fn rpc(&self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()>;
+    /// Close an already open handle.
+    fn close(&self, handle: usize) -> Result<()>;
     /// Open a leaf at the given path. The result is a handle.
     fn open(&self, path: &str) -> Result<usize>;
     /// Get metadata of given path.
@@ -324,11 +355,17 @@ pub trait Frontend {
     }
 }
 
-pub struct ObjHandle<'a, T>(&'a T, usize);
+pub struct ObjHandle<'a, T: Frontend>(&'a T, usize);
 
-impl<'a, T> From<(&'a T, usize)> for ObjHandle<'a, T> {
+impl<'a, T: Frontend> From<(&'a T, usize)> for ObjHandle<'a, T> {
     fn from((a, b): (&'a T, usize)) -> Self {
         Self(a, b)
+    }
+}
+
+impl<'a, T: Frontend> Drop for ObjHandle<'a, T> {
+    fn drop(&mut self) {
+        self.0.close(self.1);
     }
 }
 
@@ -347,15 +384,15 @@ impl<'a, T: Frontend> ObjHandle<'a, T> {
     }
 }
 
-pub struct ObjCursor<'a, T>(ObjHandle<'a, T>, Size);
+pub struct ObjCursor<'a, T: Frontend>(ObjHandle<'a, T>, Size);
 
-impl<'a, T> From<(&'a T, usize)> for ObjCursor<'a, T> {
+impl<'a, T: Frontend> From<(&'a T, usize)> for ObjCursor<'a, T> {
     fn from((a, b): (&'a T, usize)) -> Self {
         Self(ObjHandle(a, b), 0)
     }
 }
 
-impl<'a, T> From<(&'a T, usize, Size)> for ObjCursor<'a, T> {
+impl<'a, T: Frontend> From<(&'a T, usize, Size)> for ObjCursor<'a, T> {
     fn from((a, b, c): (&'a T, usize, Size)) -> Self {
         Self(ObjHandle(a, b), c)
     }

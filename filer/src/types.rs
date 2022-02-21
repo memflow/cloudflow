@@ -3,6 +3,7 @@ use abi_stable::StableAbi;
 use cglue::prelude::v1::*;
 use cglue::trait_group::c_void;
 use core::num::NonZeroI32;
+use sharded_slab::{Entry, Slab};
 
 pub type Size = u64;
 
@@ -102,4 +103,83 @@ impl NodeMetadata {
 
 pub trait SetContext {
     fn set_context(&mut self, ctx: &CArc<c_void>);
+}
+
+use core::sync::atomic::{AtomicUsize, Ordering};
+
+pub struct RcSlabEntry<'a, T> {
+    entry: Entry<'a, (AtomicUsize, T)>,
+}
+
+impl<'a, T> From<Entry<'a, (AtomicUsize, T)>> for RcSlabEntry<'a, T> {
+    fn from(entry: Entry<'a, (AtomicUsize, T)>) -> Self {
+        Self { entry }
+    }
+}
+
+impl<T> core::ops::Deref for RcSlabEntry<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entry.1
+    }
+}
+
+pub struct RcSlab<T> {
+    slab: Slab<(AtomicUsize, T)>,
+}
+
+impl<T> Default for RcSlab<T> {
+    fn default() -> Self {
+        Self {
+            slab: Default::default(),
+        }
+    }
+}
+
+impl<T> RcSlab<T> {
+    pub fn insert(&self, val: T) -> Option<usize> {
+        self.slab.insert((1.into(), val))
+    }
+
+    pub fn get(&self, idx: usize) -> Option<RcSlabEntry<T>> {
+        self.slab.get(idx).map(<_>::into)
+    }
+
+    pub fn dec_rc(&self, idx: usize) -> Option<Option<RcSlabEntry<T>>> {
+        self.slab.get(idx).map(|entry| {
+            if entry.0.fetch_sub(1, Ordering::Relaxed) == 1 {
+                self.slab.remove(idx);
+                Some(entry.into())
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn inc_rc(&self, idx: usize) -> Option<()> {
+        self.slab.get(idx).and_then(|entry| {
+            let mut prev = entry.0.load(Ordering::Relaxed);
+            while prev != 0 {
+                match entry.0.compare_exchange_weak(
+                    prev,
+                    prev + 1,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(p) => {
+                        prev = p;
+                        break;
+                    }
+                    Err(p) => prev = p,
+                }
+            }
+
+            if prev == 0 {
+                None
+            } else {
+                Some(())
+            }
+        })
+    }
 }

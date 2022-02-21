@@ -87,7 +87,7 @@ impl<T> RmHandler<T> {
 pub struct LocalBackend<T: 'static, C: 'static = ()> {
     entries: CArcSome<DashMap<String, T>>,
     context: CArc<C>,
-    handle_objs: Slab<FileOpsObj<c_void>>,
+    handle_objs: RcSlab<FileOpsObj<c_void>>,
     build_fn: Option<fn(&str, &CArc<C>) -> Result<T>>,
     new_handle: Result<usize>,
     rm_handle: Result<usize>,
@@ -98,7 +98,7 @@ impl<T, C> Default for LocalBackend<T, C> {
         let entries: DashMap<String, T> = Default::default();
         let entries: CArcSome<DashMap<String, T>> = entries.into();
 
-        let handle_objs = Slab::new();
+        let handle_objs = Default::default();
 
         let mut ret = Self {
             entries,
@@ -136,7 +136,7 @@ impl<T, C> LocalBackend<T, C> {
 
     pub fn rebuild_rm(&mut self) {
         if let Ok(rm_handle) = self.rm_handle {
-            self.handle_objs.remove(rm_handle);
+            self.handle_objs.dec_rc(rm_handle);
         }
         let rm_obj = RmHandler(self.entries.clone());
         let rm_obj = FileOpsObj::new(rm_obj.into(), None, Some(RmHandler::write), None);
@@ -149,7 +149,7 @@ impl<T, C> LocalBackend<T, C> {
 
     pub fn rebuild_new(&mut self) {
         if let Ok(new_handle) = self.new_handle {
-            self.handle_objs.remove(new_handle);
+            self.handle_objs.dec_rc(new_handle);
         }
 
         if let Some(build_fn) = self.build_fn {
@@ -224,6 +224,13 @@ impl<T: Branch, C> Backend for LocalBackend<T, C> {
         match self.handle_objs.get(handle) {
             Some(f) => f.rpc(input, output),
             _ => Err(Error(ErrorOrigin::Backend, ErrorKind::NotFound)),
+        }
+    }
+
+    fn close(&self, stack: BackendStack, handle: usize) -> Result<()> {
+        match self.handle_objs.dec_rc(handle) {
+            Some(_) => Ok(()),
+            None => Err(Error(ErrorOrigin::Backend, ErrorKind::NotFound)),
         }
     }
 
@@ -359,6 +366,8 @@ pub trait Backend {
         input: &[u8],
         output: &mut [u8],
     ) -> Result<()>;
+    /// Close an opened handle.
+    fn close(&self, stack: BackendStack, handle: usize) -> Result<()>;
     /// Open a leaf at the given path. The result is a handle.
     fn open(&self, stack: BackendStack, path: &str, plugins: &CPluginStore) -> Result<usize>;
     /// Get metadata of given path.

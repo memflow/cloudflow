@@ -409,9 +409,7 @@ impl FilesystemMT for FilerFs {
         _lock_owner: u64,
         _flush: bool,
     ) -> ResultEmpty {
-        // TODO: close handles
-        // Err(libc::EIO)
-        Ok(())
+        self.node.close(fh as _).map_err(|_| libc::EIO)
     }
 
     /// Write out any pending changes of a file.

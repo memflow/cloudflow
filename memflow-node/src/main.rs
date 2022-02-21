@@ -238,7 +238,7 @@ fn main() -> Result<()> {
 
     let mut conn_new = node.open_cursor("connector/new")?;
     write!(conn_new, "kcore kcore")?;
-    write!(conn_new, "qemu_win10 -c native qemu:win10-hw")?;
+    write!(conn_new, "qemu_win10 -c native qemu:win10-32")?;
 
     write!(os_new, "win -c qemu_win10 win32")?;
 
@@ -315,6 +315,9 @@ fn main() -> Result<()> {
 
         println!("Lines: {}", maps_handle.lines().count());
     }
+
+    core::mem::drop(os_new);
+    core::mem::drop(conn_new);
 
     filer_fuse::mount(node, "/tmp/memflow", 1000, 1000)?;
 
