@@ -365,7 +365,10 @@ impl FilesystemMT for FilerFs {
         match cursor.seek(SeekFrom::Start(offset)) {
             Ok(off) if offset == off => match cursor.write(&data) {
                 Ok(written) => Ok(written as u32),
-                Err(_) => Err(libc::EIO),
+                Err(e) => {
+                    error!("{e}");
+                    Err(libc::EIO)
+                },
             },
             _ => Err(libc::EIO),
         }

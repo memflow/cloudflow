@@ -40,7 +40,7 @@ fn map_insert<T>(entries: &DashMap<String, T>, name: &str, entry: T) -> bool {
 
 fn map_checked_insert<T>(entries: &DashMap<String, T>, name: &str, entry: T) -> Result<()> {
     if !map_insert(entries, name, entry) {
-        Err(Error(ErrorOrigin::Backend, ErrorKind::InvalidArgument))
+        Err(Error(ErrorOrigin::Backend, ErrorKind::AlreadyExists))
     } else {
         Ok(())
     }
@@ -58,6 +58,11 @@ impl<T, C> NewHandler<T, C> {
             if let Err(e) = std::str::from_utf8(&d.1)
                 .map_err(|_| Error(ErrorOrigin::Backend, ErrorKind::InvalidArgument))
                 .map(|a| a.split_once(" ").unwrap_or((a, "")))
+                .and_then(|(n, a)| if !map_exists(&*self.0, n) {
+                    Ok((n, a))
+                } else {
+                    Err(Error(ErrorOrigin::Backend, ErrorKind::AlreadyExists))
+                })
                 .and_then(|(n, a)| (self.2)(a, &self.1).map(|o| (n, o)))
                 .and_then(|(n, o)| map_checked_insert(&*self.0, n, o))
             {
@@ -75,7 +80,7 @@ impl<T> RmHandler<T> {
         for d in data.inp {
             if let Err(e) = std::str::from_utf8(&d.1)
                 .map_err(|_| Error(ErrorOrigin::Backend, ErrorKind::InvalidArgument))
-                .map(|n| self.0.remove(n))
+                .map(|n| self.0.remove(n.trim()))
             {
                 let _ = opt_call(data.out_fail.as_deref_mut(), (d, e).into());
             }
@@ -228,9 +233,13 @@ impl<T: Branch, C> Backend for LocalBackend<T, C> {
     }
 
     fn close(&self, stack: BackendStack, handle: usize) -> Result<()> {
-        match self.handle_objs.dec_rc(handle) {
-            Some(_) => Ok(()),
-            None => Err(Error(ErrorOrigin::Backend, ErrorKind::NotFound)),
+        if Ok(handle) != self.new_handle && Ok(handle) != self.rm_handle {
+            match self.handle_objs.dec_rc(handle) {
+                Some(_) => Ok(()),
+                None => Err(Error(ErrorOrigin::Backend, ErrorKind::NotFound)),
+            }
+        } else {
+            Ok(())
         }
     }
 

@@ -213,7 +213,7 @@ impl<C, D: AsRef<[u8]>> FnFile<C, D> {
 }
 
 pub extern "C" fn self_as_leaf<
-    T: Leaf /* + Into<LeafBaseArcBox<'static, T, c_void>>*/ + Clone + 'static,
+    T: Leaf + Clone + 'static,
 >(
     obj: &T,
     ctx: &CArc<c_void>,
