@@ -25,7 +25,6 @@ fn path_to_str(path: &Path) -> String {
         .iter()
         .skip(1)
         .map(|s| s.to_string_lossy())
-        .inspect(|s| println!("|s| {}", s))
         .collect::<Vec<_>>()
         .join("/");
 
@@ -48,7 +47,6 @@ impl FilesystemMT for FilerFs {
     /// * `fh`: a file handle if this is called on an open file.
     fn getattr(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>) -> ResultEntry {
         let ospath = path_to_str(path);
-        println!("META {}", ospath);
         match self.node.metadata(&ospath) {
             // TODO: handle readonly flags, directories
             // let masked_flags =
@@ -108,7 +106,7 @@ impl FilesystemMT for FilerFs {
     /// * `fh`: a file handle if this is called on an open file.
     /// * `mode`: the mode to change the file to.
     fn chmod(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>, _mode: u32) -> ResultEmpty {
-        info!("chmod {:?}", path);
+        debug!("chmod {:?}", path);
         Err(libc::ENOSYS)
     }
 
@@ -125,7 +123,7 @@ impl FilesystemMT for FilerFs {
         _uid: Option<u32>,
         _gid: Option<u32>,
     ) -> ResultEmpty {
-        info!("chown {:?}", path);
+        debug!("chown {:?}", path);
         Err(libc::ENOSYS)
     }
 
@@ -140,7 +138,7 @@ impl FilesystemMT for FilerFs {
         _fh: Option<u64>,
         _size: u64,
     ) -> ResultEmpty {
-        info!("truncate {:?}", path);
+        debug!("truncate {:?}", path);
         Err(libc::ENOSYS)
     }
 
@@ -157,7 +155,7 @@ impl FilesystemMT for FilerFs {
         _atime: Option<Timespec>,
         _mtime: Option<Timespec>,
     ) -> ResultEmpty {
-        info!("utimens {:?}", path);
+        debug!("utimens {:?}", path);
         Err(libc::ENOSYS)
     }
 
@@ -173,7 +171,7 @@ impl FilesystemMT for FilerFs {
         _bkuptime: Option<Timespec>,
         _flags: Option<u32>,
     ) -> ResultEmpty {
-        info!("utimens_macos {:?}", path);
+        debug!("utimens_macos {:?}", path);
         Err(libc::ENOSYS)
     }
 
@@ -181,7 +179,7 @@ impl FilesystemMT for FilerFs {
 
     /// Read a symbolic link.
     fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
-        info!("readlink {:?}", path);
+        debug!("readlink {:?}", path);
         Err(libc::ENOSYS)
     }
 
@@ -199,7 +197,7 @@ impl FilesystemMT for FilerFs {
         _mode: u32,
         _rdev: u32,
     ) -> ResultEntry {
-        info!("mknod {:?} {:?}", parent, name);
+        debug!("mknod {:?} {:?}", parent, name);
         Err(libc::ENOSYS)
     }
 
@@ -209,7 +207,7 @@ impl FilesystemMT for FilerFs {
     /// * `name`: name of the directory.
     /// * `mode`: permissions for the new directory.
     fn mkdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr, _mode: u32) -> ResultEntry {
-        info!("mkdir {:?} {:?}", parent, name);
+        debug!("mkdir {:?} {:?}", parent, name);
         Err(libc::ENOSYS)
     }
 
@@ -218,7 +216,7 @@ impl FilesystemMT for FilerFs {
     /// * `parent`: path to the directory containing the file to delete.
     /// * `name`: name of the file to delete.
     fn unlink(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
-        info!("unlink {:?} {:?}", parent, name);
+        debug!("unlink {:?} {:?}", parent, name);
         Err(libc::ENOSYS)
     }
 
@@ -227,7 +225,7 @@ impl FilesystemMT for FilerFs {
     /// * `parent`: path to the directory containing the directory to delete.
     /// * `name`: name of the directory to delete.
     fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
-        info!("rmdir {:?} {:?}", parent, name);
+        debug!("rmdir {:?} {:?}", parent, name);
         Err(libc::ENOSYS)
     }
 
@@ -243,7 +241,7 @@ impl FilesystemMT for FilerFs {
         name: &OsStr,
         target: &Path,
     ) -> ResultEntry {
-        info!("symlink {:?} {:?} {:?}", parent, name, target);
+        debug!("symlink {:?} {:?} {:?}", parent, name, target);
         Err(libc::ENOSYS)
     }
 
@@ -261,7 +259,7 @@ impl FilesystemMT for FilerFs {
         newparent: &Path,
         newname: &OsStr,
     ) -> ResultEmpty {
-        info!(
+        debug!(
             "rename {:?} {:?} {:?} {:?}",
             parent, name, newparent, newname
         );
@@ -280,7 +278,7 @@ impl FilesystemMT for FilerFs {
         newparent: &Path,
         newname: &OsStr,
     ) -> ResultEntry {
-        info!("link {:?} {:?} {:?}", path, newparent, newname);
+        debug!("link {:?} {:?} {:?}", path, newparent, newname);
         Err(libc::ENOSYS)
     }
 
@@ -291,7 +289,7 @@ impl FilesystemMT for FilerFs {
     ///
     /// Return a tuple of (file handle, flags). The file handle will be passed to any subsequent
     /// calls that operate on the file, and can be any value you choose, though it should allow
-    /// your filesystem to identify the file opened even without any path info.
+    /// your filesystem to identify the file opened even without any path debug.
     fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
         let ospath = path_to_str(path);
         match self.node.open(&ospath) {
@@ -385,7 +383,7 @@ impl FilesystemMT for FilerFs {
     /// * `lock_owner`: if the filesystem supports locking (`setlk`, `getlk`), remove all locks
     ///   belonging to this lock owner.
     fn flush(&self, _req: RequestInfo, path: &Path, _fh: u64, _lock_owner: u64) -> ResultEmpty {
-        info!("flush {:?}", path);
+        debug!("flush {:?}", path);
         Err(libc::ENOSYS)
     }
 
@@ -420,7 +418,7 @@ impl FilesystemMT for FilerFs {
     /// * `fh`: file handle returned from the `open` call.
     /// * `datasync`: if `false`, also write metadata, otherwise just write file data.
     fn fsync(&self, _req: RequestInfo, path: &Path, _fh: u64, _datasync: bool) -> ResultEmpty {
-        info!("fsync {:?}", path);
+        debug!("fsync {:?}", path);
         Err(libc::ENOSYS)
     }
 
@@ -433,7 +431,7 @@ impl FilesystemMT for FilerFs {
     ///
     /// Return a tuple of (file handle, flags). The file handle will be passed to any subsequent
     /// calls that operate on the directory, and can be any value you choose, though it should
-    /// allow your filesystem to identify the directory opened even without any path info.
+    /// allow your filesystem to identify the directory opened even without any path debug.
     fn opendir(&self, _req: RequestInfo, _path: &Path, flags: u32) -> ResultOpen {
         Ok((1, flags))
     }
@@ -472,7 +470,7 @@ impl FilesystemMT for FilerFs {
     /// * `fh`: file handle returned from the `opendir` call.
     /// * `flags`: the file access flags passed to the `opendir` call.
     fn releasedir(&self, _req: RequestInfo, _path: &Path, _fh: u64, _flags: u32) -> ResultEmpty {
-        //info!("releasedir {:?}", path);
+        //debug!("releasedir {:?}", path);
         //Err(libc::ENOSYS)
         Ok(())
     }
@@ -481,7 +479,7 @@ impl FilesystemMT for FilerFs {
     ///
     /// Analogous to the `fsync` call.
     fn fsyncdir(&self, _req: RequestInfo, path: &Path, _fh: u64, _datasync: bool) -> ResultEmpty {
-        info!("fsyncdir {:?}", path);
+        debug!("fsyncdir {:?}", path);
         Err(libc::ENOSYS)
     }
 
@@ -491,7 +489,7 @@ impl FilesystemMT for FilerFs {
     ///
     /// See the `Statfs` struct for more details.
     fn statfs(&self, _req: RequestInfo, path: &Path) -> ResultStatfs {
-        info!("statfs {:?}", path);
+        debug!("statfs {:?}", path);
         Err(libc::ENOSYS)
     }
 
@@ -511,7 +509,7 @@ impl FilesystemMT for FilerFs {
         _flags: u32,
         _position: u32,
     ) -> ResultEmpty {
-        info!("setxattr {:?} {:?}", path, name);
+        debug!("setxattr {:?} {:?}", path, name);
         Err(libc::ENOSYS)
     }
 
@@ -524,7 +522,7 @@ impl FilesystemMT for FilerFs {
     /// If `size` is 0, return `Xattr::Size(n)` where `n` is the size of the attribute data.
     /// Otherwise, return `Xattr::Data(data)` with the requested data.
     fn getxattr(&self, _req: RequestInfo, path: &Path, name: &OsStr, _size: u32) -> ResultXattr {
-        info!("getxattr {:?} {:?}", path, name);
+        debug!("getxattr {:?} {:?}", path, name);
         Err(libc::ENOSYS)
     }
 
@@ -538,7 +536,7 @@ impl FilesystemMT for FilerFs {
     /// Otherwise, return `Xattr::Data(data)` where `data` is all the null-terminated attribute
     /// names.
     fn listxattr(&self, _req: RequestInfo, path: &Path, _size: u32) -> ResultXattr {
-        info!("listxattr {:?}", path);
+        debug!("listxattr {:?}", path);
         Err(libc::ENOSYS)
     }
 
@@ -547,7 +545,7 @@ impl FilesystemMT for FilerFs {
     /// * `path`: path to the file.
     /// * `name`: name of the attribute to remove.
     fn removexattr(&self, _req: RequestInfo, path: &Path, name: &OsStr) -> ResultEmpty {
-        info!("removexattr {:?} {:?}", path, name);
+        debug!("removexattr {:?} {:?}", path, name);
         Err(libc::ENOSYS)
     }
 
@@ -559,7 +557,7 @@ impl FilesystemMT for FilerFs {
     /// Return `Ok(())` if all requested permissions are allowed, otherwise return `Err(EACCES)`
     /// or other error code as appropriate (e.g. `ENOENT` if the file doesn't exist).
     fn access(&self, _req: RequestInfo, path: &Path, _mask: u32) -> ResultEmpty {
-        info!("access {:?}", path);
+        debug!("access {:?}", path);
 
         // TODO: build path structure and lazily evaluate it
 
@@ -574,7 +572,7 @@ impl FilesystemMT for FilerFs {
     /// * `flags`: flags like would be passed to `open`.
     ///
     /// Return a `CreatedEntry` (which contains the new file's attributes as well as a file handle
-    /// -- see documentation on `open` for more info on that).
+    /// -- see documentation on `open` for more debug on that).
     fn create(
         &self,
         _req: RequestInfo,
@@ -583,7 +581,7 @@ impl FilesystemMT for FilerFs {
         _mode: u32,
         _flags: u32,
     ) -> ResultCreate {
-        info!("create {:?} {:?}", parent, name);
+        debug!("create {:?} {:?}", parent, name);
         Err(libc::ENOSYS)
     }
 
@@ -598,7 +596,7 @@ impl FilesystemMT for FilerFs {
     /// * `name`: new name for the volume
     #[cfg(target_os = "macos")]
     fn setvolname(&self, _req: RequestInfo, name: &OsStr) -> ResultEmpty {
-        info!("create {:?}", name);
+        debug!("create {:?}", name);
         Err(libc::ENOSYS)
     }
 
@@ -611,7 +609,7 @@ impl FilesystemMT for FilerFs {
     /// Return an `XTimes` struct with the times, or other error code as appropriate.
     #[cfg(target_os = "macos")]
     fn getxtimes(&self, _req: RequestInfo, path: &Path) -> ResultXTimes {
-        info!("getxtimes {:?}", path);
+        debug!("getxtimes {:?}", path);
         Err(libc::ENOSYS)
     }
 }
@@ -623,7 +621,13 @@ impl Drop for FilerFs {
     }
 }
 
-pub fn mount(node: CArcSome<Node>, mount_point: &str, uid: u32, gid: u32) -> Result<()> {
+pub fn mount(
+    node: CArcSome<Node>,
+    mount_point: &str,
+    allow_other: bool,
+    uid: u32,
+    gid: u32,
+) -> Result<()> {
     if mount_point.is_empty() {
         return Err(ErrorKind::InvalidPath.into());
     }
@@ -633,11 +637,18 @@ pub fn mount(node: CArcSome<Node>, mount_point: &str, uid: u32, gid: u32) -> Res
     info!("filesystem mounted at {}", mount_point);
     info!("please use 'umount' or 'fusermount -u' to unmount the filesystem");
 
+    let mut opts = "auto_unmount".to_string();
+
+    if allow_other {
+        opts += ",allow_other";
+    }
+
+    if uid > 0 && gid > 0 {
+        opts += &format!(",uid={uid},gid={gid}");
+    }
+
     std::thread::spawn(move || {
-        let opts = [
-            "-o",
-            &format!("auto_unmount,allow_other,uid={},gid={}", uid, gid),
-        ];
+        let opts = ["-o", &opts];
         let mntopts = opts.iter().map(|o| o.as_ref()).collect::<Vec<&OsStr>>();
 
         // the filesystem will add itself into the global scope

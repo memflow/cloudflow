@@ -9,7 +9,7 @@ debug = true
 [workspace]
 members = [
 	"cloudflow",
-    "memflow-node",
+    "cloudflow-node",
 	"filer",
 	"filer-fuse",
 	"filer-tokio",
@@ -17,7 +17,7 @@ members = [
 ]
 default-members = [
 	"cloudflow",
-    "memflow-node",
+    "cloudflow-node",
 	"filer",
 	"filer-fuse",
 	"filer-tokio",
