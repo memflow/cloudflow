@@ -1,10 +1,9 @@
 use anyhow::Result;
 use clap::*;
 use cloudflow::*;
-use filer::prelude::v1::*;
+
 use log::*;
-use memflow::prelude::v1::{Address, *};
-use std::time::{Duration, Instant};
+use memflow::prelude::v1::*;
 
 fn main() -> Result<()> {
     let args = parse_args();

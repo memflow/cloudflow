@@ -75,7 +75,7 @@ impl From<ErrorKind> for Error {
 }
 
 impl From<std::io::Error> for Error {
-    fn from(err: std::io::Error) -> Self {
+    fn from(_err: std::io::Error) -> Self {
         Error(ErrorOrigin::Io, ErrorKind::Unknown)
     }
 }

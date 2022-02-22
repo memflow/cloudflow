@@ -5,8 +5,7 @@ use log::*;
 use std::ffi::{OsStr, OsString};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, Instant};
+
 use time::*;
 
 pub struct FilerFs {
@@ -368,7 +367,7 @@ impl FilesystemMT for FilerFs {
                 Err(e) => {
                     error!("{e}");
                     Err(libc::EIO)
-                },
+                }
             },
             _ => Err(libc::EIO),
         }

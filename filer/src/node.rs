@@ -453,16 +453,19 @@ fn single_io<T: core::ops::Deref<Target = [u8]>>(
 
 impl<'a, T: Frontend> std::io::Read for ObjCursor<'a, T> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let read = single_io(|data| self.0.read(data), self.1.0, buf.into())
+        let read = single_io(|data| self.0.read(data), self.1 .0, buf.into())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.as_str()))?;
 
-        self.1.0 += read as Size;
+        self.1 .0 += read as Size;
 
-        if read == 0 && self.1.1 == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "EoF"));
+        if read == 0 && self.1 .1 == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "EoF",
+            ));
         }
 
-        self.1.1 = read;
+        self.1 .1 = read;
 
         Ok(read)
     }
@@ -470,16 +473,19 @@ impl<'a, T: Frontend> std::io::Read for ObjCursor<'a, T> {
 
 impl<'a, T: Frontend> std::io::Write for ObjCursor<'a, T> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let written = single_io(|data| self.0.write(data), self.1.0, buf.into())
+        let written = single_io(|data| self.0.write(data), self.1 .0, buf.into())
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.as_str()))?;
 
-        self.1.0 += written as Size;
+        self.1 .0 += written as Size;
 
-        if written == 0 && self.1.1 == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "EoF"));
+        if written == 0 && self.1 .1 == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "EoF",
+            ));
         }
 
-        self.1.1 = written;
+        self.1 .1 = written;
 
         Ok(written)
     }
@@ -495,16 +501,16 @@ impl<'a, T: Frontend> std::io::Seek for ObjCursor<'a, T> {
     fn seek(&mut self, s: SeekFrom) -> std::io::Result<u64> {
         match s {
             SeekFrom::Start(v) => {
-                self.1.0 = v as u64;
+                self.1 .0 = v as u64;
                 Ok(v)
             }
             SeekFrom::Current(v) => {
                 if v >= 0 {
-                    self.1.0 += v as Size;
+                    self.1 .0 += v as Size;
                 } else {
-                    self.1.0 -= (-v) as Size;
+                    self.1 .0 -= (-v) as Size;
                 }
-                Ok(self.1.0 as u64)
+                Ok(self.1 .0 as u64)
             }
             SeekFrom::End(_) => Err(std::io::Error::new(
                 std::io::ErrorKind::Other,

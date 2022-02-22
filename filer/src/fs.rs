@@ -10,7 +10,6 @@ use cglue::prelude::v1::*;
 use cglue::result::from_int_result_empty;
 pub use cglue::slice::CSliceMut;
 use cglue::trait_group::c_void;
-use core::num::NonZeroI32;
 
 /// Safely wrap fallible functions to return a integer result value.
 ///
@@ -212,9 +211,7 @@ impl<C, D: AsRef<[u8]>> FnFile<C, D> {
     }
 }
 
-pub extern "C" fn self_as_leaf<
-    T: Leaf + Clone + 'static,
->(
+pub extern "C" fn self_as_leaf<T: Leaf + Clone + 'static>(
     obj: &T,
     ctx: &CArc<c_void>,
 ) -> COption<LeafArcBox<'static>> {

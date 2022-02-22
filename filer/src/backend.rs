@@ -11,7 +11,6 @@ pub use cglue::slice::CSliceMut;
 use cglue::trait_group::c_void;
 
 use dashmap::{mapref::one::Ref, DashMap};
-use sharded_slab::Slab;
 
 #[derive(StableAbi)]
 #[repr(C)]
@@ -58,10 +57,12 @@ impl<T, C> NewHandler<T, C> {
             if let Err(e) = std::str::from_utf8(&d.1)
                 .map_err(|_| Error(ErrorOrigin::Backend, ErrorKind::InvalidArgument))
                 .map(|a| a.split_once(" ").unwrap_or((a, "")))
-                .and_then(|(n, a)| if !map_exists(&*self.0, n) {
-                    Ok((n, a))
-                } else {
-                    Err(Error(ErrorOrigin::Backend, ErrorKind::AlreadyExists))
+                .and_then(|(n, a)| {
+                    if !map_exists(&*self.0, n) {
+                        Ok((n, a))
+                    } else {
+                        Err(Error(ErrorOrigin::Backend, ErrorKind::AlreadyExists))
+                    }
                 })
                 .and_then(|(n, a)| (self.2)(a, &self.1).map(|o| (n, o)))
                 .and_then(|(n, o)| map_checked_insert(&*self.0, n, o))
@@ -205,14 +206,14 @@ impl<T, C> LocalBackend<T, C> {
 }
 
 impl<T: Branch, C> Backend for LocalBackend<T, C> {
-    fn read(&self, stack: BackendStack, handle: usize, data: VecOps<RWData>) -> Result<()> {
+    fn read(&self, _stack: BackendStack, handle: usize, data: VecOps<RWData>) -> Result<()> {
         match self.handle_objs.get(handle) {
             Some(f) => f.read(data),
             _ => Err(Error(ErrorOrigin::Backend, ErrorKind::NotFound)),
         }
     }
 
-    fn write(&self, stack: BackendStack, handle: usize, data: VecOps<ROData>) -> Result<()> {
+    fn write(&self, _stack: BackendStack, handle: usize, data: VecOps<ROData>) -> Result<()> {
         match self.handle_objs.get(handle) {
             Some(f) => f.write(data),
             _ => Err(Error(ErrorOrigin::Backend, ErrorKind::NotFound)),
@@ -221,7 +222,7 @@ impl<T: Branch, C> Backend for LocalBackend<T, C> {
 
     fn rpc(
         &self,
-        stack: BackendStack,
+        _stack: BackendStack,
         handle: usize,
         input: &[u8],
         output: &mut [u8],
@@ -232,7 +233,7 @@ impl<T: Branch, C> Backend for LocalBackend<T, C> {
         }
     }
 
-    fn close(&self, stack: BackendStack, handle: usize) -> Result<()> {
+    fn close(&self, _stack: BackendStack, handle: usize) -> Result<()> {
         if Ok(handle) != self.new_handle && Ok(handle) != self.rm_handle {
             match self.handle_objs.dec_rc(handle) {
                 Some(_) => Ok(()),
@@ -243,7 +244,7 @@ impl<T: Branch, C> Backend for LocalBackend<T, C> {
         }
     }
 
-    fn open(&self, stack: BackendStack, path: &str, plugins: &CPluginStore) -> Result<usize> {
+    fn open(&self, _stack: BackendStack, path: &str, plugins: &CPluginStore) -> Result<usize> {
         let (branch, path) = path.split_once("/").unwrap_or((path, ""));
 
         if path.is_empty() && branch == "new" {
@@ -267,7 +268,7 @@ impl<T: Branch, C> Backend for LocalBackend<T, C> {
     /// Get metadata of given path.
     fn metadata(
         &self,
-        stack: BackendStack,
+        _stack: BackendStack,
         path: &str,
         plugins: &CPluginStore,
     ) -> Result<NodeMetadata> {
@@ -297,7 +298,7 @@ impl<T: Branch, C> Backend for LocalBackend<T, C> {
 
     fn list(
         &self,
-        stack: BackendStack,
+        _stack: BackendStack,
         path: &str,
         plugins: &CPluginStore,
         out: &mut OpaqueCallback<ListEntry>,

@@ -1,15 +1,15 @@
 use cglue::arc::CArcSome;
 use cglue::callback::OpaqueCallback;
 use cglue::result::IntError;
-use cglue::slice::{CSliceMut, CSliceRef};
+use cglue::slice::CSliceMut;
 use cglue::tuple::CTup2;
 use core::mem::size_of;
 use core::num::NonZeroI32;
 use filer::prelude::v1::*;
-use std::cell::RefCell;
+
 use std::collections::BTreeMap;
 use std::io;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
+use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{tcp, TcpListener, TcpStream};
 use tokio::runtime::{Handle, Runtime};
@@ -72,7 +72,7 @@ impl<'a> SegmentTree<'a> {
                 let end = start + len as Size;
 
                 if seg_end > start {
-                    let (seg, seg_sz) = segs.swap_remove(i);
+                    let (seg, _seg_sz) = segs.swap_remove(i);
 
                     // Add anything on the left
                     if seg_start < start {
@@ -181,7 +181,7 @@ pub struct FilerClient<T> {
 
 impl<T: AsyncRead + AsyncWrite + Unpin> Frontend for FilerClient<T> {
     /// Perform read operation on the given handle
-    fn read(&self, handle: usize, mut data: VecOps<RWData>) -> Result<()> {
+    fn read(&self, _handle: usize, mut data: VecOps<RWData>) -> Result<()> {
         self.runtime.block_on(async {
             let mut stream = self.stream.lock().await;
             let mut bufs = SegmentTree::default();
@@ -234,7 +234,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Frontend for FilerClient<T> {
                         stream.read_exact(&mut err).await?;
                         let mut addr = Size::from_le_bytes(addr);
                         let mut buf_len = Size::from_le_bytes(buf_len) as usize;
-                        let mut err = i32::from_le_bytes(err) as usize;
+                        let _err = i32::from_le_bytes(err) as usize;
                         while buf_len > 0 {
                             let buf = bufs.get(addr, buf_len).unwrap();
                             let blen = buf.len();
@@ -251,27 +251,27 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Frontend for FilerClient<T> {
         })
     }
     /// Perform write operation on the given handle.
-    fn write(&self, handle: usize, data: VecOps<ROData>) -> Result<()> {
+    fn write(&self, _handle: usize, _data: VecOps<ROData>) -> Result<()> {
         todo!()
     }
     /// Perform remote procedure call on the given handle.
-    fn rpc(&self, handle: usize, input: &[u8], output: &mut [u8]) -> Result<()> {
+    fn rpc(&self, _handle: usize, _input: &[u8], _output: &mut [u8]) -> Result<()> {
         todo!()
     }
     /// Close an already open handle.
-    fn close(&self, handle: usize) -> Result<()> {
+    fn close(&self, _handle: usize) -> Result<()> {
         todo!()
     }
     /// Open a leaf at the given path. The result is a handle.
-    fn open(&self, path: &str) -> Result<usize> {
+    fn open(&self, _path: &str) -> Result<usize> {
         todo!()
     }
     /// Get metadata of given path.
-    fn metadata(&self, path: &str) -> Result<NodeMetadata> {
+    fn metadata(&self, _path: &str) -> Result<NodeMetadata> {
         todo!()
     }
     /// List entries in the given path. It is a (name, is_branch) pair.
-    fn list(&self, path: &str, out: &mut OpaqueCallback<ListEntry>) -> Result<()> {
+    fn list(&self, _path: &str, _out: &mut OpaqueCallback<ListEntry>) -> Result<()> {
         todo!()
     }
 }
@@ -285,7 +285,7 @@ pub struct FilerServer<T: Listener> {
 impl<T: Listener> FilerServer<T> {
     pub async fn run(mut self) -> io::Result<()> {
         loop {
-            let (mut socket, addr) = self.listener.accept().await?;
+            let (socket, addr) = self.listener.accept().await?;
 
             let node = self.node.clone();
 
@@ -303,7 +303,7 @@ impl<T: Listener> FilerServer<T> {
                         use FrontendFuncs::*;
                         match unsafe { core::mem::transmute::<_, FrontendFuncs>(cmd) } {
                             Read => {
-                                let mut bufs = FragmentBuffer::default();
+                                let bufs = FragmentBuffer::default();
                                 let bufs = Mutex::new(bufs);
                                 let writer = Mutex::new(&mut writer);
 
