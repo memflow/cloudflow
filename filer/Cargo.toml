@@ -1,0 +1,18 @@
+[package]
+name = "filer"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+abi_stable = { version = "0.10" }
+cglue = { version = ">=0.2.7", default-features = false, features = ["layout_checks"] }
+dashmap = "5"
+sharded-slab = "0.1"
+crossbeam-deque = "0.8"
+once_cell = "1.9"
+
+[features]
+default = ["std"]
+std = []

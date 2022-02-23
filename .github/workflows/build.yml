@@ -65,8 +65,10 @@ jobs:
           toolchain: nightly
           override: true
 
-      - run: cargo install grcov
+      - run: rustup component add rustfmt
 
+      - run: cargo install grcov
+      
       - name: Run tests with coverage
         run: |
           export CARGO_INCREMENTAL=0
