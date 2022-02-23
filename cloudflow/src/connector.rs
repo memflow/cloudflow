@@ -97,6 +97,7 @@ impl ThreadedConnector {
             memdata_map(data, |data| {
                 self.get()
                     .phys_view()
+                    .zero_fill_gaps()
                     .read_raw_iter(
                         data,
                     )
