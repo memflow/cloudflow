@@ -16,6 +16,9 @@ pub extern "C" fn on_node(node: &Node, ctx: CArc<c_void>) {
     );
 
     node.plugins
+        .register_mapping("info", Mapping::Leaf(map_into_info, ctx.clone()));
+
+    node.plugins
         .register_mapping("maps", Mapping::Leaf(map_into_maps, ctx.clone()));
 
     node.plugins
@@ -149,6 +152,18 @@ fn format_perms(page_type: PageType) -> String {
             '-'
         }
     )
+}
+
+extern "C" fn map_into_info(
+    proc: &LazyProcessArc,
+    ctx: &CArc<c_void>,
+) -> COption<LeafArcBox<'static>> {
+    let file = FnFile::new(proc.clone(), |proc| {
+        let proc = proc.proc().ok_or(ErrorKind::Uninitialized)?;
+        let info = proc.get_orig().info();
+        Ok(format!("{:#?}", info))
+    });
+    COption::Some(trait_obj!((file, ctx.clone()) as Leaf))
 }
 
 extern "C" fn map_into_maps(
