@@ -523,9 +523,7 @@ impl Branch for PidNameProcessList {
     fn get_entry(&self, path: &str, plugins: &CPluginStore) -> Result<DirEntry> {
         let (name, path) = branch::split_path(path);
 
-        println!("GI {}", name);
         let info = self.get_info(name)?;
-        println!("GOTI {}", name);
 
         let proc = LazyProcessArc::from(LazyProcessBase::new(self.os.clone(), info));
 
