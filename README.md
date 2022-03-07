@@ -31,7 +31,7 @@ cargo install cloudflow-node --git https://github.com/memflow/cloudflow
 
 ### How to use
 
-Run an elevated instance with FUSE:
+Run an elevated instance with FUSE (you can add `v` multiple time to increase verbosity e.g. `-vvv`):
 
 ```
 cloudflow -ef
@@ -44,22 +44,34 @@ Mounting FUSE filesystem on /cloudflow
 Initialized!
 ```
 
-Create a new connector instance:
+Create a new connector instance to connect to the first QEMU VM instance which can be found on your system:
 
 ```
-echo "qemu_vm qemu" >> /cloudflow/connector/new
+echo "my_qemu_vm qemu" >> /cloudflow/connector/new
+```
+
+To connect to a specific VM with the name 'my-qemu-vm' you can pass an argument to the connector:
+
+```
+echo "my_qemu_vm qemu:my-qemu-vm" >> /cloudflow/connector/new
 ```
 
 Create a new OS instance on top of QEMU:
 
 ```
-echo "win -c qemu_vm win32" >> /cloudflow/os/new
+echo "win -c my_qemu_vm win32" >> /cloudflow/os/new
 ```
 
-The input format for both of these operations is as follows:
+Optionally you can specify the architecture for the new OS instance:
 
 ```
-<name> [-c chain_on] <os/connector>[:args]
+echo "win -c my_qemu_vm win32::arch=x64" >> /cloudflow/os/new
+```
+
+The input format can contain args and extra args. Both are parsed by the new connector/OS instance. The available options therefore depend on the type of the new instance. For all of the operations above the input format is as follows:
+
+```
+<name> [-c chain_on] <os/connector>[:args[:extra args]]
 ```
 
 Get kernel minidump:
