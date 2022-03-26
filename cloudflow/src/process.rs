@@ -439,7 +439,7 @@ impl Branch for ModuleList {
 struct ModuleArchList {
     process: LazyProcessBase,
     arch: ArchitectureIdent,
-    name_cache: CArcSome<DashMap<String, (Address, ArchitectureIdent)>>,
+    name_cache: CArcSome<DashMap<String, ModuleInfo>>,
 }
 
 impl From<(LazyProcessBase, ArchitectureIdent)> for ModuleArchList {
@@ -452,46 +452,14 @@ impl From<(LazyProcessBase, ArchitectureIdent)> for ModuleArchList {
     }
 }
 
-impl ModuleArchList {
-    fn get_info(&self, name: &str) -> Result<ModuleInfo> {
-        let info = if let Some(cache_entry) = self.name_cache.get(name) {
-            let proc = self.process.proc().ok_or(ErrorKind::Unknown)?;
-            let info = proc
-                .get()
-                .module_by_address(cache_entry.0, cache_entry.1)
-                .map_err(|_| ErrorKind::NotFound)?;
-
-            if &*info.name == name {
-                Some(info)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        info.map(|i| Ok(i)).unwrap_or_else(|| {
-            let proc = self.process.proc().ok_or(ErrorKind::Unknown)?;
-            proc.get()
-                .module_by_name(name)
-                .map_err(|_| ErrorKind::NotFound.into())
-                .map(|info| {
-                    self.name_cache
-                        .insert(name.into(), (info.address, info.arch));
-                    info
-                })
-        })
-    }
-}
-
 impl Branch for ModuleArchList {
     fn get_entry(&self, path: &str, plugins: &CPluginStore) -> Result<DirEntry> {
         let (name, path) = branch::split_path(path);
 
-        let info = self.get_info(name)?;
+        let info = self.name_cache.get(name).ok_or(ErrorKind::NotFound)?;
 
         let proc = self.process.proc().ok_or(ErrorKind::Unknown)?;
-        let module = ModuleArc::from(ModuleBase::new(proc.clone(), info));
+        let module = ModuleArc::from(ModuleBase::new(proc.clone(), info.clone()));
 
         if let Some(path) = path {
             module.get_entry(path, plugins)
@@ -515,11 +483,7 @@ impl Branch for ModuleArchList {
                 Some(&self.arch),
                 (&mut |info: ModuleInfo| {
                     let name = info.name.to_string();
-                    if self
-                        .name_cache
-                        .insert(name.clone(), (info.address, info.arch))
-                        .is_none()
-                    {
+                    if self.name_cache.insert(name.clone(), info.clone()).is_none() {
                         let module = ModuleArc::from(ModuleBase::new(proc.clone(), info));
                         let entry =
                             DirEntry::Branch(trait_obj!(
