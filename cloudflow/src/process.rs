@@ -1,11 +1,17 @@
+use crate::module::{ModuleArc, ModuleBase};
 use crate::os::OsBase;
 use crate::util::*;
+use crate::MemflowBackend;
 use abi_stable::StableAbi;
 pub use cglue::slice::CSliceMut;
 use cglue::trait_group::c_void;
+use dashmap::DashMap;
 use filer::branch;
 use filer::prelude::v1::{Error, ErrorKind, ErrorOrigin, Result, *};
 use memflow::prelude::v1::*;
+use num::Num;
+
+use std::sync::Arc;
 
 use once_cell::sync::OnceCell;
 
@@ -22,7 +28,10 @@ pub extern "C" fn on_node(node: &Node, ctx: CArc<c_void>) {
         .register_mapping("maps", Mapping::Leaf(map_into_maps, ctx.clone()));
 
     node.plugins
-        .register_mapping("phys_maps", Mapping::Leaf(map_into_phys_maps, ctx));
+        .register_mapping("phys_maps", Mapping::Leaf(map_into_phys_maps, ctx.clone()));
+
+    node.plugins
+        .register_mapping("modules", Mapping::Branch(ModuleList::map_into, ctx));
 }
 
 thread_types!(
@@ -75,7 +84,7 @@ impl Leaf for LazyProcessArc {
 }
 
 impl ThreadedProcess {
-    extern "C" fn read(&self, data: VecOps<RWData>) -> i32 {
+    pub(crate) extern "C" fn read(&self, data: VecOps<RWData>) -> i32 {
         int_res_wrap! {
             memdata_map(data, |data| {
                 self.get()
@@ -85,7 +94,7 @@ impl ThreadedProcess {
         }
     }
 
-    extern "C" fn write(&self, data: VecOps<ROData>) -> i32 {
+    pub(crate) extern "C" fn write(&self, data: VecOps<ROData>) -> i32 {
         int_res_wrap! {
             memdata_map(data, |data| {
                 self.get()
@@ -95,7 +104,7 @@ impl ThreadedProcess {
         }
     }
 
-    extern "C" fn rpc(&self, _input: CSliceRef<u8>, _output: CSliceMut<u8>) -> i32 {
+    pub(crate) extern "C" fn rpc(&self, _input: CSliceRef<u8>, _output: CSliceMut<u8>) -> i32 {
         Result::Ok(()).into_int_result()
     }
 }
@@ -245,5 +254,286 @@ extern "C" fn map_into_phys_maps(
         COption::Some(trait_obj!((file, ctx.clone()) as Leaf))
     } else {
         COption::None
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, StableAbi)]
+pub struct LazyProcessRoot {
+    process: LazyProcessBase,
+    mlist: CArcSome<c_void>,
+}
+
+impl core::ops::Deref for LazyProcessRoot {
+    type Target = LazyProcessBase;
+
+    fn deref(&self) -> &Self::Target {
+        &self.process
+    }
+}
+
+impl From<LazyProcessBase> for LazyProcessRoot {
+    fn from(process: LazyProcessBase) -> Self {
+        Self {
+            mlist: CArcSome::from(ModuleList::from(process.clone())).into_opaque(),
+            process,
+        }
+    }
+}
+
+impl LazyProcessRoot {
+    unsafe fn mlist(&self) -> &CArcSome<ModuleList> {
+        (&self.mlist as *const CArcSome<c_void> as *const CArcSome<ModuleList>)
+            .as_ref()
+            .unwrap()
+    }
+}
+
+impl Branch for LazyProcessRoot {
+    fn get_entry(&self, path: &str, plugins: &CPluginStore) -> Result<DirEntry> {
+        branch::get_entry(self, path, plugins)
+    }
+
+    fn list(
+        &self,
+        plugins: &CPluginStore,
+        out: &mut OpaqueCallback<BranchListEntry>,
+    ) -> Result<()> {
+        branch::list(self, plugins)?
+            .into_iter()
+            .map(|(name, entry)| BranchListEntry::new(name.into(), entry))
+            .feed_into_mut(out);
+        Ok(())
+    }
+}
+
+impl Leaf for LazyProcessRoot {
+    fn open(&self) -> Result<FileOpsObj<c_void>> {
+        Ok(FileOpsObj::new(
+            self.proc().ok_or(ErrorKind::Uninitialized)?.clone().into(),
+            Some(ThreadedProcess::read),
+            Some(ThreadedProcess::write),
+            Some(ThreadedProcess::rpc),
+        ))
+    }
+
+    fn metadata(&self) -> Result<NodeMetadata> {
+        Ok(NodeMetadata {
+            is_branch: false,
+            has_read: true,
+            has_write: true,
+            has_rpc: true,
+            size: (1 as Size)
+                << self
+                    .os
+                    .get_orig()
+                    .info()
+                    .arch
+                    .into_obj()
+                    .address_space_bits(),
+            ..Default::default()
+        })
+    }
+}
+
+#[derive(Clone)]
+struct ModuleList {
+    process: LazyProcessBase,
+    by_sys_arch: ModuleArchList,
+    by_proc_arch: Option<ModuleArchList>,
+}
+
+impl From<LazyProcessBase> for ModuleList {
+    fn from(process: LazyProcessBase) -> Self {
+        let sys_arch = process.os.get().info().arch;
+        let by_sys_arch = (process.clone(), sys_arch).into();
+
+        let by_proc_arch = if let Some(proc) = process.proc() {
+            let proc = proc.get();
+            let info = proc.info();
+            if info.proc_arch != info.sys_arch {
+                Some((process.clone(), info.proc_arch).into())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        Self {
+            process,
+            by_sys_arch,
+            by_proc_arch,
+        }
+    }
+}
+
+impl ModuleList {
+    extern "C" fn map_into(
+        process: &LazyProcessArc,
+        ctx: &CArc<c_void>,
+    ) -> COption<BranchArcBox<'static>> {
+        // TODO: improve this workaround
+        let process: LazyProcessRoot = LazyProcessBase::clone(process).into();
+        COption::Some(trait_obj!(
+            (unsafe { &**process.mlist() }.clone(), ctx.clone()) as Branch
+        ))
+    }
+}
+
+impl Branch for ModuleList {
+    fn get_entry(&self, path: &str, plugins: &CPluginStore) -> Result<DirEntry> {
+        let (entry, path) = branch::split_path(path);
+
+        if entry == self.by_sys_arch.arch.to_string() {
+            return branch::forward_entry(
+                self.by_sys_arch.clone(),
+                self.process.os.ctx.clone(),
+                path,
+                plugins,
+            );
+        }
+
+        if let Some(by_proc_arch) = &self.by_proc_arch {
+            if entry == by_proc_arch.arch.to_string() {
+                return branch::forward_entry(
+                    by_proc_arch.clone(),
+                    self.process.os.ctx.clone(),
+                    path,
+                    plugins,
+                );
+            }
+        }
+
+        Err(Error(ErrorOrigin::Branch, ErrorKind::NotFound))
+    }
+
+    fn list(
+        &self,
+        _plugins: &CPluginStore,
+        out: &mut OpaqueCallback<BranchListEntry>,
+    ) -> Result<()> {
+        // display system architecture subfolder
+        let _ = out.call(BranchListEntry::new(
+            self.by_sys_arch.arch.to_string().into(),
+            DirEntry::Branch(trait_obj!(
+                (self.by_sys_arch.clone(), self.process.os.ctx.clone()) as Branch
+            )),
+        ));
+
+        // display process architecture subfolder only if it differs from system architecture
+        if let Some(by_proc_arch) = &self.by_proc_arch {
+            let _ = out.call(BranchListEntry::new(
+                by_proc_arch.arch.to_string().into(),
+                DirEntry::Branch(trait_obj!(
+                    (by_proc_arch.clone(), self.process.os.ctx.clone()) as Branch
+                )),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct ModuleArchList {
+    process: LazyProcessBase,
+    arch: ArchitectureIdent,
+    name_cache: CArcSome<DashMap<String, (Address, ArchitectureIdent)>>,
+}
+
+impl From<(LazyProcessBase, ArchitectureIdent)> for ModuleArchList {
+    fn from((process, arch): (LazyProcessBase, ArchitectureIdent)) -> Self {
+        Self {
+            process,
+            arch,
+            name_cache: DashMap::default().into(),
+        }
+    }
+}
+
+impl ModuleArchList {
+    fn get_info(&self, name: &str) -> Result<ModuleInfo> {
+        let info = if let Some(cache_entry) = self.name_cache.get(name) {
+            let proc = self.process.proc().ok_or(ErrorKind::Unknown)?;
+            let info = proc
+                .get()
+                .module_by_address(cache_entry.0, cache_entry.1)
+                .map_err(|_| ErrorKind::NotFound)?;
+
+            if &*info.name == name {
+                Some(info)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        info.map(|i| Ok(i)).unwrap_or_else(|| {
+            let proc = self.process.proc().ok_or(ErrorKind::Unknown)?;
+            proc.get()
+                .module_by_name(name)
+                .map_err(|_| ErrorKind::NotFound.into())
+                .map(|info| {
+                    self.name_cache
+                        .insert(name.into(), (info.address, info.arch));
+                    info
+                })
+        })
+    }
+}
+
+impl Branch for ModuleArchList {
+    fn get_entry(&self, path: &str, plugins: &CPluginStore) -> Result<DirEntry> {
+        let (name, path) = branch::split_path(path);
+
+        let info = self.get_info(name)?;
+
+        let proc = self.process.proc().ok_or(ErrorKind::Unknown)?;
+        let module = ModuleArc::from(ModuleBase::new(proc.clone(), info));
+
+        if let Some(path) = path {
+            module.get_entry(path, plugins)
+        } else {
+            Ok(DirEntry::Branch(trait_obj!(
+                (module, self.process.os.ctx.clone()) as Branch
+            )))
+        }
+    }
+
+    fn list(
+        &self,
+        _plugins: &CPluginStore,
+        out: &mut OpaqueCallback<BranchListEntry>,
+    ) -> Result<()> {
+        self.name_cache.clear();
+
+        let proc = self.process.proc().ok_or(ErrorKind::Unknown)?;
+        proc.get()
+            .module_list_callback(
+                Some(&self.arch),
+                (&mut |info: ModuleInfo| {
+                    let name = info.name.to_string();
+                    if self
+                        .name_cache
+                        .insert(name.clone(), (info.address, info.arch))
+                        .is_none()
+                    {
+                        let module = ModuleArc::from(ModuleBase::new(proc.clone(), info));
+                        let entry =
+                            DirEntry::Branch(trait_obj!(
+                                (module, self.process.os.ctx.clone()) as Branch
+                            ));
+                        out.call(BranchListEntry::new(format!("{}", name).into(), entry))
+                    } else {
+                        true
+                    }
+                })
+                    .into(),
+            )
+            .map_err(|_| ErrorKind::Unknown)?;
+
+        Ok(())
     }
 }

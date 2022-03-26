@@ -10,12 +10,17 @@ use os::OsRoot;
 use std::sync::Arc;
 
 pub mod connector;
+pub mod module;
 pub mod os;
 pub mod process;
 pub mod util;
 
-const BUILTIN_PLUGINS: &[extern "C" fn(&Node, CArc<c_void>)] =
-    &[os::on_node, process::on_node, connector::on_node];
+const BUILTIN_PLUGINS: &[extern "C" fn(&Node, CArc<c_void>)] = &[
+    os::on_node,
+    process::on_node,
+    module::on_node,
+    connector::on_node,
+];
 
 pub fn create_node() -> CArcSome<Node> {
     let backend = NodeBackend::default();

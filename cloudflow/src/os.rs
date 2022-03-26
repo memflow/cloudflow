@@ -26,7 +26,7 @@ thread_types!(OsInstanceArcBox<'static>, ThreadedOs, ThreadedOsArc);
 #[derive(Clone, StableAbi)]
 pub struct OsBase {
     os: ThreadedOsArc,
-    ctx: CArc<c_void>,
+    pub(crate) ctx: CArc<c_void>,
 }
 
 impl core::ops::Deref for OsBase {
@@ -548,7 +548,6 @@ impl Branch for PidNameProcessList {
                             LazyProcessArc::from(LazyProcessBase::new(self.os.clone(), info));
                         let entry =
                             DirEntry::Branch(trait_obj!((proc, self.os.ctx.clone()) as Branch));
-                        println!("CALL {}", name);
                         out.call(BranchListEntry::new(name.into(), entry))
                     } else {
                         true
