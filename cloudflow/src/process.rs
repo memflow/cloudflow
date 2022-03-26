@@ -452,11 +452,25 @@ impl From<(LazyProcessBase, ArchitectureIdent)> for ModuleArchList {
     }
 }
 
+impl ModuleArchList {
+    pub fn find_module_by_name(&self, name: &str) -> Option<ModuleInfo> {
+        let info = self.name_cache.get(name);
+        if let Some(info) = info {
+            Some(info.clone())
+        } else {
+            let proc = self.process.proc()?;
+            let info = proc.get().module_by_name(name).ok()?;
+            self.name_cache.insert(name.to_string(), info.clone());
+            Some(info)
+        }
+    }
+}
+
 impl Branch for ModuleArchList {
     fn get_entry(&self, path: &str, plugins: &CPluginStore) -> Result<DirEntry> {
         let (name, path) = branch::split_path(path);
 
-        let info = self.name_cache.get(name).ok_or(ErrorKind::NotFound)?;
+        let info = self.find_module_by_name(name).ok_or(ErrorKind::NotFound)?;
 
         let proc = self.process.proc().ok_or(ErrorKind::Unknown)?;
         let module = ModuleArc::from(ModuleBase::new(proc.clone(), info.clone()));
