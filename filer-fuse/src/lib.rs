@@ -334,14 +334,10 @@ impl FilesystemMT for FilerFs {
                     // return empty slice
                     buf.truncate(0);
                     callback(Ok(&buf))
-                },
-                Err(_) => {
-                    callback(Err(libc::EIO))
                 }
+                Err(_) => callback(Err(libc::EIO)),
             },
-            _ => {
-                callback(Err(libc::EIO))
-            },
+            _ => callback(Err(libc::EIO)),
         }
     }
 
