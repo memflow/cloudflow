@@ -52,8 +52,7 @@ impl Leaf for ModuleArc {
             has_read: true,
             has_write: true,
             has_rpc: true,
-            // TODO: Proc vs Sys arch?
-            size: (1 as Size) << self.module_info.arch.into_obj().address_space_bits(),
+            size: self.0.module_info.size,
             ..Default::default()
         })
     }
@@ -75,21 +74,59 @@ impl ModuleBase {
     }
 
     extern "C" fn read(&self, data: VecOps<RWData>) -> i32 {
+        // TODO: size constraint
         int_res_wrap! {
-            memdata_map(data, |data| {
-                self.process.get()
-                    .read_raw_iter(data)
-                    .map_err(|_| Error(ErrorOrigin::Read, ErrorKind::Unknown))
+            memdata_map(data, |mut data| {
+                // wrap inp, out, out_fail to add/subtract the base offset
+                let inp1 = data.inp.map(|CTup3(addr, meta_addr, data)| CTup3(self.module_info.base + addr.to_umem(), self.module_info.base + meta_addr.to_umem(), data));
+
+                let mut out1 = data.out
+                    .as_mut()
+                    .map(|of| move |data: CTup2<Address, _>| of.call(CTup2(Address::from(data.0) - self.module_info.base.to_umem(), data.1)));
+                let mut out1 = out1.as_mut().map(<_>::into);
+                let out1 = out1.as_mut();
+
+                let mut out_fail1 = data.out_fail
+                    .as_mut()
+                    .map(|of| move |data: CTup2<Address, _>| of.call(CTup2(Address::from(data.0) - self.module_info.base.to_umem(), data.1)));
+                let mut out_fail1 = out_fail1.as_mut().map(<_>::into);
+                let out_fail1 = out_fail1.as_mut();
+
+                // create a new MemOps object with the wrapped values
+                MemOps::with_raw(inp1, out1, out_fail1, |data| {
+                    self.process.get()
+                        .read_raw_iter(data)
+                        .map_err(|_| Error(ErrorOrigin::Read, ErrorKind::Unknown))
+                })
             })
         }
     }
 
     extern "C" fn write(&self, data: VecOps<ROData>) -> i32 {
+        // TODO: size constraint
         int_res_wrap! {
-            memdata_map(data, |data| {
-                self.process.get()
-                    .write_raw_iter(data)
-                    .map_err(|_| Error(ErrorOrigin::Write, ErrorKind::Unknown))
+            memdata_map(data, |mut data| {
+                // wrap inp, out, out_fail to add/subtract the base offset
+                let inp1 = data.inp.map(|CTup3(addr, meta_addr, data)| CTup3(self.module_info.base + addr.to_umem(), self.module_info.base + meta_addr.to_umem(), data));
+
+                let mut out1 = data.out
+                    .as_mut()
+                    .map(|of| move |data: CTup2<Address, _>| of.call(CTup2(Address::from(data.0) - self.module_info.base.to_umem(), data.1)));
+                let mut out1 = out1.as_mut().map(<_>::into);
+                let out1 = out1.as_mut();
+
+                let mut out_fail1 = data.out_fail
+                    .as_mut()
+                    .map(|of| move |data: CTup2<Address, _>| of.call(CTup2(Address::from(data.0) - self.module_info.base.to_umem(), data.1)));
+                let mut out_fail1 = out_fail1.as_mut().map(<_>::into);
+                let out_fail1 = out_fail1.as_mut();
+
+                // create a new MemOps object with the wrapped values
+                MemOps::with_raw(inp1, out1, out_fail1, |data| {
+                    self.process.get()
+                        .write_raw_iter(data)
+                        .map_err(|_| Error(ErrorOrigin::Read, ErrorKind::Unknown))
+                })
             })
         }
     }
