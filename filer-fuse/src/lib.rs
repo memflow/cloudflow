@@ -330,9 +330,18 @@ impl FilesystemMT for FilerFs {
         match cursor.seek(SeekFrom::Start(offset)) {
             Ok(off) if offset == off => match cursor.read(&mut buf) {
                 Ok(read) => callback(Ok(&buf[..read])),
-                Err(_) => callback(Err(libc::EIO)),
+                Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    // return empty slice
+                    buf.truncate(0);
+                    callback(Ok(&buf))
+                },
+                Err(_) => {
+                    callback(Err(libc::EIO))
+                }
             },
-            _ => callback(Err(libc::EIO)),
+            _ => {
+                callback(Err(libc::EIO))
+            },
         }
     }
 
