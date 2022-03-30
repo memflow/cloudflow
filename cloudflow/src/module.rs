@@ -1,3 +1,5 @@
+use ::std::borrow::BorrowMut;
+
 use crate::os::OsBase;
 use crate::process::{ThreadedProcess, ThreadedProcessArc};
 use crate::util::*;
@@ -6,6 +8,7 @@ pub use cglue::slice::CSliceMut;
 use cglue::trait_group::c_void;
 use filer::branch;
 use filer::prelude::v1::{Error, ErrorKind, ErrorOrigin, Result, *};
+use memflow::mem::opt_call;
 use memflow::prelude::v1::*;
 
 pub extern "C" fn on_node(node: &Node, ctx: CArc<c_void>) {
@@ -64,7 +67,7 @@ pub struct ModuleBase {
     process: ThreadedProcessArc,
     module_info: ModuleInfo,
 }
-
+use std::cell::RefCell;
 impl ModuleBase {
     pub fn new(process: ThreadedProcessArc, module_info: ModuleInfo) -> Self {
         Self {
@@ -76,28 +79,60 @@ impl ModuleBase {
     extern "C" fn read(&self, data: VecOps<RWData>) -> i32 {
         // TODO: size constraint
         int_res_wrap! {
-            memdata_map(data, |mut data| {
-                // wrap inp, out, out_fail to add/subtract the base offset
-                let inp1 = data.inp.map(|CTup3(addr, meta_addr, data)| CTup3(self.module_info.base + addr.to_umem(), self.module_info.base + meta_addr.to_umem(), data));
+            memdata_map(data, |data| {
+                let base = self.module_info.base;
+                let size = self.module_info.size;
 
-                let mut out1 = data.out
-                    .as_mut()
-                    .map(|of| move |data: CTup2<Address, _>| of.call(CTup2(Address::from(data.0) - self.module_info.base.to_umem(), data.1)));
-                let mut out1 = out1.as_mut().map(<_>::into);
-                let out1 = out1.as_mut();
+                // wrap the data.inp iterator by first splitting it up at the modules max size
+                // and then remapping the desired addr and meta_addr by the module base
+                let inp = data.inp.flat_map(|CTup3(addr, meta_addr, data)| {
+                    let split = size - addr.to_umem();
+                    let (left, right) = data.split_at(size - addr.to_umem());
 
-                let mut out_fail1 = data.out_fail
-                    .as_mut()
-                    .map(|of| move |data: CTup2<Address, _>| of.call(CTup2(Address::from(data.0) - self.module_info.base.to_umem(), data.1)));
-                let mut out_fail1 = out_fail1.as_mut().map(<_>::into);
-                let out_fail1 = out_fail1.as_mut();
+                    let left = left.map(|out| CTup3(base + addr.to_umem(), base + meta_addr.to_umem(), out));
+                    let right = right.map(|out| CTup3(base + addr.to_umem() + split, base + meta_addr.to_umem() + split, out));
+
+                    left.into_iter().chain(right.into_iter())
+                });
+
+                // TODO: handle non existent data.out / data.out_fail callbacks
+
+                // wrap the data.out and data.out_fail callbacks:
+                // first we check if the desired address falls inside or outside the module and call the appropiate callback.
+                // second we subtract the module base that was added in the above function again.
+                let out_cell = RefCell::new(data.out.unwrap());
+                let out_fail_cell = RefCell::new(data.out_fail.unwrap());
+
+                let out = &mut |CTup2(addr, out)| {
+                    if addr < base + size {
+                        let mut out_cb = out_cell.borrow_mut();
+                        out_cb.call(CTup2(addr - base.to_umem(), out))
+                    } else {
+                        let mut out_fail_cb = out_fail_cell.borrow_mut();
+                        out_fail_cb.call(CTup2(addr - base.to_umem(), out))
+                    }
+                };
+                let out = &mut out.into();
+                let out = Some(out);
+
+                let out_fail = &mut |CTup2(addr, out)| {
+                    if addr < base + size {
+                        let mut out_cb = out_cell.borrow_mut();
+                        out_cb.call(CTup2(addr - base.to_umem(), out))
+                    } else {
+                        let mut out_fail_cb = out_fail_cell.borrow_mut();
+                        out_fail_cb.call(CTup2(addr - base.to_umem(), out))
+                    }
+                };
+                let out_fail = &mut out_fail.into();
+                let out_fail = Some(out_fail);
 
                 // create a new MemOps object with the wrapped values
-                MemOps::with_raw(inp1, out1, out_fail1, |data| {
+                MemOps::with_raw(inp, out, out_fail, |data| {
                     self.process.get()
                         .read_raw_iter(data)
                         .map_err(|_| Error(ErrorOrigin::Read, ErrorKind::Unknown))
-                })
+                    })
             })
         }
     }
@@ -105,28 +140,60 @@ impl ModuleBase {
     extern "C" fn write(&self, data: VecOps<ROData>) -> i32 {
         // TODO: size constraint
         int_res_wrap! {
-            memdata_map(data, |mut data| {
-                // wrap inp, out, out_fail to add/subtract the base offset
-                let inp1 = data.inp.map(|CTup3(addr, meta_addr, data)| CTup3(self.module_info.base + addr.to_umem(), self.module_info.base + meta_addr.to_umem(), data));
+            memdata_map(data, |data| {
+                let base = self.module_info.base;
+                let size = self.module_info.size;
 
-                let mut out1 = data.out
-                    .as_mut()
-                    .map(|of| move |data: CTup2<Address, _>| of.call(CTup2(Address::from(data.0) - self.module_info.base.to_umem(), data.1)));
-                let mut out1 = out1.as_mut().map(<_>::into);
-                let out1 = out1.as_mut();
+                // wrap the data.inp iterator by first splitting it up at the modules max size
+                // and then remapping the desired addr and meta_addr by the module base
+                let inp = data.inp.flat_map(|CTup3(addr, meta_addr, data)| {
+                    let split = size - addr.to_umem();
+                    let (left, right) = data.split_at(size - addr.to_umem());
 
-                let mut out_fail1 = data.out_fail
-                    .as_mut()
-                    .map(|of| move |data: CTup2<Address, _>| of.call(CTup2(Address::from(data.0) - self.module_info.base.to_umem(), data.1)));
-                let mut out_fail1 = out_fail1.as_mut().map(<_>::into);
-                let out_fail1 = out_fail1.as_mut();
+                    let left = left.map(|out| CTup3(base + addr.to_umem(), base + meta_addr.to_umem(), out));
+                    let right = right.map(|out| CTup3(base + addr.to_umem() + split, base + meta_addr.to_umem() + split, out));
+
+                    left.into_iter().chain(right.into_iter())
+                });
+
+                // TODO: handle non existent data.out / data.out_fail callbacks
+
+                // wrap the data.out and data.out_fail callbacks:
+                // first we check if the desired address falls inside or outside the module and call the appropiate callback.
+                // second we subtract the module base that was added in the above function again.
+                let out_cell = RefCell::new(data.out.unwrap());
+                let out_fail_cell = RefCell::new(data.out_fail.unwrap());
+
+                let out = &mut |CTup2(addr, out)| {
+                    if addr < base + size {
+                        let mut out_cb = out_cell.borrow_mut();
+                        out_cb.call(CTup2(addr - base.to_umem(), out))
+                    } else {
+                        let mut out_fail_cb = out_fail_cell.borrow_mut();
+                        out_fail_cb.call(CTup2(addr - base.to_umem(), out))
+                    }
+                };
+                let out = &mut out.into();
+                let out = Some(out);
+
+                let out_fail = &mut |CTup2(addr, out)| {
+                    if addr < base + size {
+                        let mut out_cb = out_cell.borrow_mut();
+                        out_cb.call(CTup2(addr - base.to_umem(), out))
+                    } else {
+                        let mut out_fail_cb = out_fail_cell.borrow_mut();
+                        out_fail_cb.call(CTup2(addr - base.to_umem(), out))
+                    }
+                };
+                let out_fail = &mut out_fail.into();
+                let out_fail = Some(out_fail);
 
                 // create a new MemOps object with the wrapped values
-                MemOps::with_raw(inp1, out1, out_fail1, |data| {
+                MemOps::with_raw(inp, out, out_fail, |data| {
                     self.process.get()
                         .write_raw_iter(data)
                         .map_err(|_| Error(ErrorOrigin::Read, ErrorKind::Unknown))
-                })
+                    })
             })
         }
     }
