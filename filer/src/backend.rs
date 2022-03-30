@@ -30,7 +30,7 @@ fn map_exists<T>(entries: &DashMap<String, T>, name: &str) -> bool {
 }
 
 fn map_insert<T>(entries: &DashMap<String, T>, name: &str, entry: T) -> bool {
-    if name.contains("/") || map_exists(entries, name) {
+    if name.contains('/') || map_exists(entries, name) {
         false
     } else {
         entries.insert(name.into(), entry).is_none()
@@ -56,7 +56,7 @@ impl<T, C> NewHandler<T, C> {
         for d in data.inp {
             if let Err(e) = std::str::from_utf8(&d.1)
                 .map_err(|_| Error(ErrorOrigin::Backend, ErrorKind::InvalidArgument))
-                .map(|a| a.split_once(" ").unwrap_or((a, "")))
+                .map(|a| a.split_once(' ').unwrap_or((a, "")))
                 .and_then(|(n, a)| {
                     if !map_exists(&*self.0, n) {
                         Ok((n, a))
@@ -245,18 +245,14 @@ impl<T: Branch, C> Backend for LocalBackend<T, C> {
     }
 
     fn open(&self, _stack: BackendStack, path: &str, plugins: &CPluginStore) -> Result<usize> {
-        let (branch, path) = path.split_once("/").unwrap_or((path, ""));
+        let (branch, path) = path.split_once('/').unwrap_or((path, ""));
 
         if path.is_empty() && branch == "new" {
             self.new_handle
         } else if path.is_empty() && branch == "rm" {
             self.rm_handle
         } else {
-            match self
-                .entries
-                .get(branch)
-                .and_then(|b| Some(b.get_entry(path, plugins)))
-            {
+            match self.entries.get(branch).map(|b| b.get_entry(path, plugins)) {
                 Some(Ok(DirEntry::Leaf(leaf))) => leaf.open().map(|o| self.push_obj(o)),
                 Some(Ok(_)) => Err(Error(ErrorOrigin::Backend, ErrorKind::InvalidArgument)),
                 Some(Err(e)) => Err(e),
@@ -272,7 +268,7 @@ impl<T: Branch, C> Backend for LocalBackend<T, C> {
         path: &str,
         plugins: &CPluginStore,
     ) -> Result<NodeMetadata> {
-        let (branch, path) = path.split_once("/").unwrap_or((path, ""));
+        let (branch, path) = path.split_once('/').unwrap_or((path, ""));
 
         if path.is_empty() && branch == "new" {
             self.new_handle.map(|_| NodeMetadata::default())
@@ -318,12 +314,12 @@ impl<T: Branch, C> Backend for LocalBackend<T, C> {
 
             Ok(())
         } else {
-            let (branch, path) = path.split_once("/").unwrap_or((path, ""));
+            let (branch, path) = path.split_once('/').unwrap_or((path, ""));
             match self.entries.get(branch) {
                 Some(branch) => {
                     let cb = &mut |entry: BranchListEntry| {
                         out.call(ListEntry::new(
-                            entry.name.into(),
+                            entry.name,
                             matches!(entry.obj, DirEntry::Branch(_)),
                         ))
                     };

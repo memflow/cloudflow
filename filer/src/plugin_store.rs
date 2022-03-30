@@ -95,7 +95,7 @@ impl From<PluginStore> for CPluginStore {
             entries.get(name.into_str()).map(|e| (*e).clone()).into()
         }
 
-        unsafe extern "C" fn entry_list<'a>(
+        unsafe extern "C" fn entry_list(
             store: &c_void,
             id: UTypeId,
             layout: &'static TypeLayout,

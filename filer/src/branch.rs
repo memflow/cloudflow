@@ -12,7 +12,7 @@ pub use cglue::slice::CSliceMut;
 use std::collections::HashMap;
 
 pub fn split_path(path: &str) -> (&str, Option<&str>) {
-    path.split_once("/")
+    path.split_once('/')
         .map(|(a, b)| (a, Some(b)))
         .unwrap_or((path, None))
 }
@@ -24,15 +24,15 @@ pub fn map_entry<T: Branch + StableAbi>(
     plugins: &CPluginStore,
 ) -> Result<DirEntry> {
     match (remote, entry) {
-        (Some(path), Mapping::Branch(map, ctx)) => map(branch, &ctx)
+        (Some(path), Mapping::Branch(map, ctx)) => map(branch, ctx)
             .as_ref()
             .ok_or::<ErrorKind>(ErrorKind::NotFound)?
             .get_entry(path, plugins),
         (None, Mapping::Branch(map, ctx)) => Ok(DirEntry::Branch(
-            Option::from(map(branch, &ctx)).ok_or(ErrorKind::NotFound)?,
+            Option::from(map(branch, ctx)).ok_or(ErrorKind::NotFound)?,
         )),
         (None, Mapping::Leaf(map, ctx)) => Ok(DirEntry::Leaf(
-            Option::from(map(branch, &ctx)).ok_or(ErrorKind::NotFound)?,
+            Option::from(map(branch, ctx)).ok_or(ErrorKind::NotFound)?,
         )),
         _ => Err(ErrorKind::NotFound.into()),
     }

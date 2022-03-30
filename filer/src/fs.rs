@@ -107,7 +107,7 @@ impl<T> FileOpsObj<T> {
         .into_opaque()
     }
 
-    pub fn read<'a>(&self, data: VecOps<RWData>) -> Result<()> {
+    pub fn read(&self, data: VecOps<RWData>) -> Result<()> {
         from_int_result_empty((self
             .read
             .ok_or(Error(ErrorOrigin::Read, ErrorKind::NotImplemented))?)(
@@ -115,7 +115,7 @@ impl<T> FileOpsObj<T> {
         ))
     }
 
-    pub fn write<'a>(&self, data: VecOps<ROData>) -> Result<()> {
+    pub fn write(&self, data: VecOps<ROData>) -> Result<()> {
         from_int_result_empty((self
             .write
             .ok_or(Error(ErrorOrigin::Write, ErrorKind::NotImplemented))?)(

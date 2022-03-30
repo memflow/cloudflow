@@ -80,7 +80,7 @@ impl NodeBackend {
     pub fn add_backend(&self, name: &str, backend: impl Backend + 'static) {
         let name = name.to_string();
 
-        self.backend_map.entry(name.to_string()).or_insert_with(|| {
+        self.backend_map.entry(name).or_insert_with(|| {
             self.backends
                 .insert(trait_obj!(backend as Backend))
                 .expect("Slab is full!")
@@ -198,7 +198,7 @@ impl Backend for NodeBackend {
     }
 
     fn write(&self, stack: BackendStack, handle: usize, data: VecOps<ROData>) -> Result<()> {
-        match self.handles.get(handle).as_ref().map(|v| &**v) {
+        match self.handles.get(handle).as_deref() {
             Some(&HandleMap::Forward(backend, handle)) => {
                 if let Some(backend) = self.backends.get(backend) {
                     backend.write((&stack, self).into(), handle, data)
@@ -218,7 +218,7 @@ impl Backend for NodeBackend {
         input: &[u8],
         output: &mut [u8],
     ) -> Result<()> {
-        match self.handles.get(handle).as_ref().map(|v| &**v) {
+        match self.handles.get(handle).as_deref() {
             Some(&HandleMap::Forward(backend, handle)) => {
                 if let Some(backend) = self.backends.get(backend) {
                     backend.rpc((&stack, self).into(), handle, input, output)
@@ -249,7 +249,7 @@ impl Backend for NodeBackend {
     }
 
     fn open(&self, stack: BackendStack, path: &str, plugins: &CPluginStore) -> Result<usize> {
-        if let Some((backend, path)) = path.split_once("/") {
+        if let Some((backend, path)) = path.split_once('/') {
             if let Some((bid, backend)) = self
                 .backend_map
                 .get(backend)
@@ -270,7 +270,7 @@ impl Backend for NodeBackend {
         path: &str,
         plugins: &CPluginStore,
     ) -> Result<NodeMetadata> {
-        if let Some((backend, path)) = path.split_once("/") {
+        if let Some((backend, path)) = path.split_once('/') {
             if let Some((_, backend)) = self
                 .backend_map
                 .get(backend)
@@ -280,12 +280,10 @@ impl Backend for NodeBackend {
             } else {
                 Err(Error(ErrorOrigin::Node, ErrorKind::NotFound))
             }
+        } else if path.is_empty() || self.backend_map.get(path).is_some() {
+            Ok(NodeMetadata::branch())
         } else {
-            if path.is_empty() || self.backend_map.get(path).is_some() {
-                Ok(NodeMetadata::branch())
-            } else {
-                Err(Error(ErrorOrigin::Node, ErrorKind::NotFound))
-            }
+            Err(Error(ErrorOrigin::Node, ErrorKind::NotFound))
         }
     }
 
@@ -297,7 +295,7 @@ impl Backend for NodeBackend {
         out: &mut OpaqueCallback<ListEntry>,
     ) -> Result<()> {
         let path = path.trim_start_matches('/');
-        let (backend, path) = path.split_once("/").unwrap_or((path, ""));
+        let (backend, path) = path.split_once('/').unwrap_or((path, ""));
 
         if !backend.is_empty() {
             if let Some(backend) = self
@@ -366,7 +364,7 @@ impl<'a, T: Frontend> From<(&'a T, usize)> for ObjHandle<'a, T> {
 impl<'a, T: Frontend> Drop for ObjHandle<'a, T> {
     fn drop(&mut self) {
         if self.2 {
-            self.0.close(self.1);
+            self.0.close(self.1).ok();
         }
     }
 }

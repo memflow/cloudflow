@@ -1,14 +1,10 @@
-use ::std::borrow::BorrowMut;
-
-use crate::os::OsBase;
-use crate::process::{ThreadedProcess, ThreadedProcessArc};
+use crate::process::ThreadedProcessArc;
 use crate::util::*;
 use abi_stable::StableAbi;
 pub use cglue::slice::CSliceMut;
 use cglue::trait_group::c_void;
 use filer::branch;
 use filer::prelude::v1::{Error, ErrorKind, ErrorOrigin, Result, *};
-use memflow::mem::opt_call;
 use memflow::prelude::v1::*;
 
 pub extern "C" fn on_node(node: &Node, ctx: CArc<c_void>) {
@@ -87,10 +83,12 @@ impl ModuleBase {
                 // and then remapping the desired addr and meta_addr by the module base
                 let inp = data.inp.flat_map(|CTup3(addr, meta_addr, data)| {
                     let split = size - addr.to_umem();
-                    let (left, right) = data.split_at(size - addr.to_umem());
+                    let (left, right) = data.split_at(split);
 
-                    let left = left.map(|out| CTup3(base + addr.to_umem(), base + meta_addr.to_umem(), out));
-                    let right = right.map(|out| CTup3(base + addr.to_umem() + split, base + meta_addr.to_umem() + split, out));
+                    let new_addr = base + addr.to_umem();
+                    let new_meta_addr = base + meta_addr.to_umem();
+                    let left = left.map(|out| CTup3(new_addr, new_meta_addr, out));
+                    let right = right.map(|out| CTup3(new_addr + split, new_meta_addr + split, out));
 
                     left.into_iter().chain(right.into_iter())
                 });
@@ -148,10 +146,12 @@ impl ModuleBase {
                 // and then remapping the desired addr and meta_addr by the module base
                 let inp = data.inp.flat_map(|CTup3(addr, meta_addr, data)| {
                     let split = size - addr.to_umem();
-                    let (left, right) = data.split_at(size - addr.to_umem());
+                    let (left, right) = data.split_at(split);
 
-                    let left = left.map(|out| CTup3(base + addr.to_umem(), base + meta_addr.to_umem(), out));
-                    let right = right.map(|out| CTup3(base + addr.to_umem() + split, base + meta_addr.to_umem() + split, out));
+                    let new_addr = base + addr.to_umem();
+                    let new_meta_addr = base + meta_addr.to_umem();
+                    let left = left.map(|out| CTup3(new_addr, new_meta_addr, out));
+                    let right = right.map(|out| CTup3(new_addr + split, new_meta_addr + split, out));
 
                     left.into_iter().chain(right.into_iter())
                 });
