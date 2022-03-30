@@ -25,7 +25,7 @@ fn path_to_str(path: &Path) -> String {
         .skip(1)
         .map(|s| s.to_string_lossy())
         .collect::<Vec<_>>()
-        .join('/');
+        .join("/");
 
     ret.strip_prefix('/').unwrap_or(&ret).to_string()
 }

@@ -1,7 +1,6 @@
 use crate::module::{ModuleArc, ModuleBase};
 use crate::os::OsBase;
 use crate::util::*;
-use crate::MemflowBackend;
 use abi_stable::StableAbi;
 pub use cglue::slice::CSliceMut;
 use cglue::trait_group::c_void;
@@ -9,9 +8,6 @@ use dashmap::DashMap;
 use filer::branch;
 use filer::prelude::v1::{Error, ErrorKind, ErrorOrigin, Result, *};
 use memflow::prelude::v1::*;
-use num::Num;
-
-use std::sync::Arc;
 
 use once_cell::sync::OnceCell;
 

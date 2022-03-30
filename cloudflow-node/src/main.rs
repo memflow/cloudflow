@@ -3,7 +3,6 @@ use clap::*;
 use cloudflow::*;
 
 use log::*;
-use memflow::prelude::v1::*;
 
 fn main() -> Result<()> {
     let args = parse_args();

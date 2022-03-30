@@ -246,8 +246,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Frontend for FilerClient<T> {
                     _ => {}
                 }
             }
-
-            Ok(())
         })
     }
     /// Perform write operation on the given handle.
