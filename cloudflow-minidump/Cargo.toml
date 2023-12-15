@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 minidump-writer = { git = "https://github.com/h33p/minidump-writer" }
-memflow = "^0.2.0-beta"
+memflow = "=0.2.0-beta10"
 abi_stable = "0.10"
 cglue = { version = ">=0.2.5", default-features = false, features = ["layout_checks"] }
 filer = { version = "0.1", path = "../filer" }

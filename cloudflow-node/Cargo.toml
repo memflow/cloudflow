@@ -12,11 +12,11 @@ path = "src/main.rs"
 [dependencies]
 cloudflow = { path = "../cloudflow" }
 anyhow = "1"
-memflow = "^0.2.0-beta"
+memflow = "=0.2.0-beta10"
 filer = { version = "0.1", path = "../filer" }
 filer-fuse = { version = "0.1", path = "../filer-fuse" }
 cloudflow-minidump = { version = "0.1", path = "../cloudflow-minidump" }
-simplelog = "^0.11.1"
+simplelog = "^0.12.1"
 log = "0.4"
 clap = { version = "3", features = ["cargo"] }
 sudo = "0.6"
