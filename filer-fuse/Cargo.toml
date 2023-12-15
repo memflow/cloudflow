@@ -5,9 +5,9 @@ edition = "2021"
 
 [dependencies]
 filer = { version = "0.1", path = "../filer" }
-time = "0.3"
+time = "0.1"
 libc = "0.2"
 log = "0.4"
 
 [target.'cfg(not(windows))'.dependencies]
-fuse_mt = "0.6"
+fuse_mt = "0.5"
