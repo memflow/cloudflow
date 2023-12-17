@@ -47,33 +47,40 @@ fn parse_args() -> ArgMatches {
     Command::new("cloudflow")
         .version(crate_version!())
         .author(crate_authors!())
-        .arg(Arg::new("verbose").short('v').multiple_occurrences(true))
-        .arg(Arg::new("fuse").long("fuse").short('f').required(false))
+        .arg(Arg::new("verbose").short('v').action(ArgAction::Count))
+        .arg(
+            Arg::new("fuse")
+                .long("fuse")
+                .short('f')
+                .action(ArgAction::SetTrue)
+                .required(false),
+        )
         .arg(
             Arg::new("fuse-mount")
                 .long("fuse-mount")
                 .short('F')
-                .takes_value(true)
+                .action(ArgAction::Set)
                 .required(false),
         )
         .arg(
             Arg::new("fuse-uid")
                 .long("fuse-uid")
                 .short('u')
-                .takes_value(true)
+                .action(ArgAction::Set)
                 .required(false),
         )
         .arg(
             Arg::new("fuse-gid")
                 .long("fuse-gid")
                 .short('g')
-                .takes_value(true)
+                .action(ArgAction::Set)
                 .required(false),
         )
         .arg(
             Arg::new("elevate")
                 .long("elevate")
                 .short('e')
+                .action(ArgAction::SetTrue)
                 .required(false),
         )
         .get_matches()
@@ -83,7 +90,7 @@ fn extract_args(
     matches: &ArgMatches,
 ) -> Result<(Option<&str>, Option<u32>, Option<u32>, bool, log::Level)> {
     // set log level
-    let level = match matches.occurrences_of("verbose") {
+    let level = match matches.get_count("verbose") {
         0 => Level::Error,
         1 => Level::Warn,
         2 => Level::Info,
@@ -92,18 +99,25 @@ fn extract_args(
         _ => Level::Trace,
     };
 
-    let fuse_mount = matches.value_of("fuse-mount").or_else(|| {
-        if matches.occurrences_of("fuse") > 0 {
-            Some("/cloudflow")
-        } else {
-            None
-        }
-    });
+    let fuse_mount = if matches.get_flag("fuse") {
+        matches
+            .get_one::<String>("fuse-mount")
+            .map(String::as_str)
+            .or(Some("/cloudflow"))
+    } else {
+        None
+    };
 
-    let fuse_uid = matches.value_of("fuse-uid").map(str::parse).transpose()?;
-    let fuse_gid = matches.value_of("fuse-gid").map(str::parse).transpose()?;
+    let fuse_uid = matches
+        .get_one::<String>("fuse-uid")
+        .map(|s| s.parse())
+        .transpose()?;
+    let fuse_gid = matches
+        .get_one::<String>("fuse-gid")
+        .map(|s| s.parse())
+        .transpose()?;
 
-    let elevate = matches.occurrences_of("elevate") > 0;
+    let elevate = matches.get_flag("elevate");
 
     Ok((fuse_mount, fuse_uid, fuse_gid, elevate, level))
 }
