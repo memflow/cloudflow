@@ -12,7 +12,7 @@ path = "src/main.rs"
 [dependencies]
 cloudflow = { path = "../cloudflow" }
 anyhow = "1"
-memflow = "=0.2.0-beta11"
+memflow = "0.2"
 filer = { version = "0.1", path = "../filer" }
 filer-fuse = { version = "0.1", path = "../filer-fuse" }
 cloudflow-minidump = { version = "0.1", path = "../cloudflow-minidump" }
