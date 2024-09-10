@@ -9,6 +9,6 @@ edition = "2021"
 minidump-writer = { git = "https://github.com/h33p/minidump-writer" }
 memflow = "0.2"
 abi_stable = "0.10"
-cglue = { version = ">=0.2.5", default-features = false, features = ["layout_checks"] }
+cglue = { version = "=0.2.14", default-features = false, features = ["layout_checks"] }
 filer = { version = "0.1", path = "../filer" }
 cloudflow = { version = "0.1", path = "../cloudflow" }

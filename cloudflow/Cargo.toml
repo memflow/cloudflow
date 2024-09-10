@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 memflow = "0.2"
 abi_stable = "0.10"
-cglue = { version = ">=0.2.5", default-features = false, features = ["layout_checks"] }
+cglue = { version = "=0.2.14", default-features = false, features = ["layout_checks"] }
 filer = { version = "0.1", path = "../filer" }
 once_cell = "1.9"
 num = "0.4"

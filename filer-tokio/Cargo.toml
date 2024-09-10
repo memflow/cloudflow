@@ -8,5 +8,5 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 filer = { version = "0.1", path = "../filer" }
-cglue = "0.2"
+cglue = "=0.2.14"
 async-trait = "0.1"

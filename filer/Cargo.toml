@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 abi_stable = { version = "0.10" }
-cglue = { version = ">=0.2.7", default-features = false, features = ["layout_checks"] }
+cglue = { version = "=0.2.14", default-features = false, features = ["layout_checks"] }
 dashmap = "5"
 sharded-slab = "0.1"
 crossbeam-deque = "0.8"
